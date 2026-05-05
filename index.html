@@ -2544,10 +2544,13 @@ async function safePost(b){
     ? Object.assign({}, b, {token: _sessionToken, userId: _sessionUserId})
     : b;
   try {
+    // Use 'text/plain' Content-Type to avoid CORS preflight redirect on Google Apps Script.
+    // GAS receives the JSON string in e.postData.contents and parses it in doPost.
     const r = await fetch(SCRIPT_URL, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify(payload),
+      redirect: 'follow'
     });
     if(!r.ok) throw new Error('Network error: ' + r.status);
     const data = await r.json();
@@ -2617,9 +2620,15 @@ async function doLogin(){
   if(!email||!pass){err.style.display='block';err.textContent='Please enter email and password.';return;}
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Signing in...';
   // Login uses POST — credentials never appear in URL or browser history
-  const res=await safePost({action:'login',email,password:pass});
+  let res;
+  try { res=await safePost({action:'login',email,password:pass}); } catch(e){ res={success:false}; }
   btn.disabled=false;btn.innerHTML='Sign In to Knosk EyeQ';
-  if(!res?.success){err.style.display='block';err.textContent=res?.error||'Login failed. Check credentials.';return;}
+  // Only show safe, user-friendly error messages — never raw server/network text
+  if(!res?.success){
+    const safeErrors=['Invalid email or password','Account pending approval by admin','Account suspended. Contact school admin.','Email and password required'];
+    const msg = safeErrors.includes(res?.error) ? res.error : 'Login failed. Please check your credentials.';
+    err.style.display='block';err.textContent=msg;return;
+  }
   err.style.display='none';
   S=res.user;
   // Store session token + userId for all subsequent authenticated requests
