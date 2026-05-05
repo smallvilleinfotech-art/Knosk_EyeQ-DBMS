@@ -2344,7 +2344,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 // ════════════════════════════════════════════
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbybs3BJmsb_FqpoEhSre0oczlQ2fT13McgKGsI7jIf7u-niMMQ9lxKV_CVmX1joXjxZ/exec';
-let DEMO_MODE = false;
+let DEMO_MODE = false; // Set to true to use built-in demo data without a backend
 let S = {}; // session
 let _chatTarget = null;
 let _chatPoll = null;
@@ -2533,9 +2533,42 @@ async function demoApi(p) {
   if(action==='deleteUser') return {success:true};
   return {error:'Unknown'};
 }
-async function safeApi(p){ return DEMO_MODE ? demoApi(p) : fetch(SCRIPT_URL+'?'+new URLSearchParams(p)).then(r=>r.json()); }
-async function safePost(b){ return DEMO_MODE ? demoApi(b) : fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify(b)}).then(r=>r.json()); }
-async function dbRead(sheet) { const r=await safeApi({action:'read',sheet}); return Array.isArray(r)?r:[]; }
+// ── Secure API Layer (POST-only, token-authenticated) ──
+let _sessionToken = null;
+let _sessionUserId = null;
+
+async function safePost(b){
+  if(DEMO_MODE) return demoApi(b);
+  // Always attach token + userId — backend validates on every request
+  const payload = (_sessionToken && _sessionUserId)
+    ? Object.assign({}, b, {token: _sessionToken, userId: _sessionUserId})
+    : b;
+  try {
+    const r = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!r.ok) throw new Error('Network error: ' + r.status);
+    const data = await r.json();
+    // If server says session expired, force re-login
+    if(data && data.authError){
+      toast('Session expired. Please sign in again.','warn');
+      setTimeout(()=>{
+        sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');
+        _sessionToken=null;_sessionUserId=null;S={};
+        showPage('page-login');
+      },2000);
+    }
+    return data;
+  } catch(e) {
+    console.error('API error:', e.message);
+    return {error: e.message};
+  }
+}
+
+// All data operations go through POST — never GET (no credentials in URL)
+async function dbRead(sheet){ const r=await safePost({action:'read',sheet}); return Array.isArray(r)?r:[]; }
 async function dbWrite(sheet,row){ return safePost({action:'write',sheet,row}); }
 async function dbUpdate(sheet,id,updates){ return safePost({action:'update',sheet,id,updates}); }
 
@@ -2583,12 +2616,16 @@ async function doLogin(){
   const btn=$('login-btn');
   if(!email||!pass){err.style.display='block';err.textContent='Please enter email and password.';return;}
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Signing in...';
-  const res=await safeApi({action:'login',email,password:pass});
+  // Login uses POST — credentials never appear in URL or browser history
+  const res=await safePost({action:'login',email,password:pass});
   btn.disabled=false;btn.innerHTML='Sign In to Knosk EyeQ';
   if(!res?.success){err.style.display='block';err.textContent=res?.error||'Login failed. Check credentials.';return;}
   err.style.display='none';
   S=res.user;
+  // Store session token + userId for all subsequent authenticated requests
+  if(res.token){ _sessionToken=res.token; _sessionUserId=S.id; }
   sessionStorage.setItem('knosk_s',JSON.stringify(S));
+  if(res.token){ sessionStorage.setItem('knosk_t',res.token); sessionStorage.setItem('knosk_u',S.id); }
   showWelcomePage();
 }
 
@@ -5264,7 +5301,14 @@ document.getElementById('modal-create-meeting')?.addEventListener('click',async(
 
 function doLogout(){
   if(confirm('Sign out of Knosk EyeQ?')){
-    sessionStorage.removeItem('knosk_s');S={};
+    // Revoke token on server (fire-and-forget — no need to await)
+    if(_sessionToken && !DEMO_MODE){
+      fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'logout',token:_sessionToken,userId:_sessionUserId})
+      }).catch(()=>{});
+    }
+    sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');sessionStorage.removeItem('knosk_u');
+    _sessionToken=null;_sessionUserId=null;S={};
     if(_chatPoll)clearInterval(_chatPoll);
     if(_slidePoll)clearInterval(_slidePoll);
     showPage('page-login');
@@ -5272,6 +5316,9 @@ function doLogout(){
 }
 window.addEventListener('load',()=>{
   const saved=sessionStorage.getItem('knosk_s');
+  const savedToken=sessionStorage.getItem('knosk_t');
+  const savedUserId=sessionStorage.getItem('knosk_u');
+  if(savedToken){ _sessionToken=savedToken; _sessionUserId=savedUserId; }
   if(saved){try{const u=JSON.parse(saved);if(u?.id){S=u;if(S.activeRole)selectRole(S.activeRole);else showWelcomePage();}}catch(e){}}
   document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 });
