@@ -1944,6 +1944,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
         <div id="email-tab-content">
           <div class="card">
             <div class="card-header"><div class="card-title">📥 Inbox</div><div class="live-dot">Live</div></div>
+            <div id="email-tab-heading" style="font-size:15px;font-weight:700;color:var(--text);padding:14px 16px 0;">📥 Inbox</div>
             <div class="card-body" id="email-inbox-list">
               <div class="empty"><div class="empty-icon">📧</div><p>No emails yet. Compose your first email above.</p></div>
             </div>
@@ -4871,32 +4872,70 @@ async function loadEmailView(){
         `<option value="${u.email}">${u.name} (${ROLES[u.role]?.label||u.role}) — ${u.email}</option>`
       ).join('');
   }
-  loadEmailInbox();
+  loadEmailInbox('inbox');
 }
 
-async function loadEmailInbox(){
+async function loadEmailInbox(tab='inbox'){
   const emails=await dbRead('Emails');
-  const mine=emails.filter(e=>e.recipientEmail===S.email||e.toEmails?.includes(S.email));
   const el=$('email-inbox-list');
+  const heading=$('email-tab-heading');
   if(!el)return;
-  if(!mine.length){el.innerHTML='<div class="empty"><div class="empty-icon">📧</div><p>Your inbox is empty.</p></div>';return;}
-  el.innerHTML=mine.map(e=>`
-    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .15s;border-radius:var(--r-sm);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''" onclick="viewEmail('${e.id}')">
-      <div style="width:40px;height:40px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:white;flex-shrink:0;">${gi(e.senderName||'?')}</div>
+
+  let filtered=[];
+  let emptyMsg='';
+  let headingText='';
+
+  if(tab==='inbox'){
+    // Emails sent TO me (I am in toEmails or ccEmails)
+    filtered=emails.filter(e=>{
+      const to=Array.isArray(e.toEmails)?e.toEmails:(typeof e.toEmails==='string'?JSON.parse(e.toEmails||'[]'):[]);
+      const cc=Array.isArray(e.ccEmails)?e.ccEmails:(typeof e.ccEmails==='string'?JSON.parse(e.ccEmails||'[]'):[]);
+      return to.includes(S.email)||cc.includes(S.email);
+    });
+    emptyMsg='<div class="empty"><div class="empty-icon">📧</div><p>Your inbox is empty.</p></div>';
+    headingText='📥 Inbox';
+  } else if(tab==='sent'){
+    // Emails sent BY me
+    filtered=emails.filter(e=>e.senderId===S.id||e.senderEmail===S.email);
+    emptyMsg='<div class="empty"><div class="empty-icon">📤</div><p>No sent emails yet.</p></div>';
+    headingText='📤 Sent';
+  } else {
+    filtered=[];
+    emptyMsg='<div class="empty"><div class="empty-icon">📝</div><p>Drafts coming soon.</p></div>';
+    headingText='📝 Drafts';
+  }
+
+  // Update heading
+  if(heading) heading.textContent=headingText;
+
+  if(!filtered.length){el.innerHTML=emptyMsg;return;}
+
+  // Sort newest first
+  filtered.sort((a,b)=>new Date(b.sentAt)-new Date(a.sentAt));
+
+  el.innerHTML=filtered.map(e=>{
+    const to=Array.isArray(e.toEmails)?e.toEmails:(typeof e.toEmails==='string'?JSON.parse(e.toEmails||'[]'):[]);
+    const isSent=tab==='sent';
+    const subtitle=isSent
+      ?`To: ${to.join(', ')} · ${fmtDate(e.sentAt)}`
+      :`From: ${e.senderName||'—'} · ${fmtDate(e.sentAt)}`;
+    return`<div style="display:flex;align-items:flex-start;gap:12px;padding:14px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .15s;border-radius:var(--r-sm);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''" onclick="viewEmail('${e.id}')">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:white;flex-shrink:0;">${gi(isSent?S.name:(e.senderName||'?'))}</div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13.5px;font-weight:${e.read?'500':'800'};color:var(--text);">${e.subject||'(no subject)'}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">From: ${e.senderName||'—'} · ${fmtDate(e.sentAt)}</div>
-        <div style="font-size:12px;color:var(--text2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(e.body||'').slice(0,100)}...</div>
+        <div style="font-size:13.5px;font-weight:${e.read||isSent?'500':'800'};color:var(--text);">${e.subject||'(no subject)'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">${subtitle}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(e.body||'').slice(0,120)}...</div>
       </div>
-      ${!e.read?'<div style="width:8px;height:8px;border-radius:50%;background:var(--blue);flex-shrink:0;margin-top:6px;"></div>':''}
-    </div>`).join('');
+      ${!e.read&&!isSent?'<div style="width:8px;height:8px;border-radius:50%;background:var(--blue);flex-shrink:0;margin-top:6px;"></div>':''}
+    </div>`;
+  }).join('');
 }
 
 function switchEmailTab(tab,el){
   document.querySelectorAll('#view-email .tab-btn').forEach(b=>b.classList.remove('active'));
   if(el)el.classList.add('active');
-  if(tab==='inbox')loadEmailInbox();
-  else $('email-inbox-list').innerHTML=`<div class="empty"><div class="empty-icon">📤</div><p>${tab==='sent'?'Sent emails':'Drafts'} coming soon</p></div>`;
+  // ── FIX 3: All tabs now properly handled, heading updates correctly ──
+  loadEmailInbox(tab);
 }
 
 function addEmailRecipient(){
@@ -4937,26 +4976,55 @@ async function sendAppEmail(){
   const msg=$('compose-email-msg');
   if(!_emailRecipients.length){msg.innerHTML='<div class="alert al-err">Add at least one recipient.</div>';return;}
   if(!subject||!body){msg.innerHTML='<div class="alert al-err">Subject and message body are required.</div>';return;}
-  // Get CC users (co-founders + knosk admins)
+
+  msg.innerHTML='<div class="alert al-info">⏳ Sending...</div>';
+
   const users=await dbRead('Users');
-  const ccEmails=users.filter(u=>u.role==='cofounder'||u.role==='knosk_admin').map(u=>u.email);
+  // CC co-founders and knosk admins automatically (exclude if already a recipient)
+  const ccEmails=users
+    .filter(u=>(u.role==='cofounder'||u.role==='knosk_admin') && !_emailRecipients.includes(u.email) && u.email!==S.email)
+    .map(u=>u.email);
   const allTo=[..._emailRecipients];
-  // Save to DB (text only, no files)
-  const row={
-    id:uid(),senderId:S.id,senderName:S.name,senderEmail:S.email||'',
-    toEmails:allTo,ccEmails,subject,body,
-    hasAttachment:!!$('email-attachment')?.files?.length,
-    sentAt:new Date().toISOString(),read:false,
-  };
-  await dbWrite('Emails',row);
-  // Add in-app notifications for enrolled recipients
-  for(const u of users.filter(u=>allTo.includes(u.email)||ccEmails.includes(u.email))){
-    await dbWrite('Notifications',{id:uid(),userId:u.id,title:'📧 New Email: '+subject,body:'From: '+S.name,icon:'📧',read:false,createdAt:new Date().toISOString()});
+
+  // ── FIX 1: Actually send the email via Gmail through the backend ──
+  const sendResult = await safePost({
+    action:'sendEmail',
+    toEmails: allTo,
+    ccEmails,
+    subject,
+    body,
+    senderName: S.name,
+    senderId: S.id,
+    senderEmail: S.email||'',
+    hasAttachment: !!$('email-attachment')?.files?.length,
+  });
+
+  if(sendResult?.error){
+    msg.innerHTML=`<div class="alert al-err">❌ Failed to send: ${sendResult.error}</div>`;
+    return;
   }
-  msg.innerHTML='<div class="alert al-ok">✅ Email sent! In-app recipients notified. Text saved to database.</div>';
+
+  // ── FIX 2: Also save to local Emails sheet for inbox tracking ──
+  // Backend already saves it via sendEmailViaGmail → writeRow,
+  // but we invalidate cache so inbox refreshes immediately
+  _invalidate('Emails');
+
+  // ── In-app notifications for registered recipients ──
+  for(const u of users.filter(u=>allTo.includes(u.email)||ccEmails.includes(u.email))){
+    await dbWrite('Notifications',{
+      id:uid(),userId:u.id,
+      title:'📧 New Email: '+subject,
+      body:'From: '+S.name,
+      icon:'📧',read:false,
+      createdAt:new Date().toISOString()
+    });
+  }
+
+  msg.innerHTML='<div class="alert al-ok">✅ Email sent successfully! Recipients will receive it in their inbox.</div>';
   _emailRecipients=[];renderEmailTags();
-  toast('📧 Email sent successfully');
-  setTimeout(()=>{closeModal('modal-compose-email');msg.innerHTML='';},2000);
+  toast('📧 Email sent!');
+  loadEmailInbox(); // refresh inbox immediately
+  setTimeout(()=>{closeModal('modal-compose-email');msg.innerHTML='';$('email-subject').value='';$('email-body').value='';},2500);
 }
 
 function viewEmail(id){
