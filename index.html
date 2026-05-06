@@ -1464,6 +1464,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
       <div class="sb-av" id="sb-av">A</div>
       <div style="min-width:0;">
         <div class="sb-nm" id="sb-nm">Loading...</div>
+        <span class="sync-dot" id="sync-dot" title="Syncing..."></span>
         <div class="sb-role-pill" id="sb-role-pill">User</div>
       </div>
     </div>
@@ -2570,10 +2571,147 @@ async function safePost(b){
   }
 }
 
-// All data operations go through POST — never GET (no credentials in URL)
-async function dbRead(sheet){ const r=await safePost({action:'read',sheet}); return Array.isArray(r)?r:[]; }
-async function dbWrite(sheet,row){ return safePost({action:'write',sheet,row}); }
-async function dbUpdate(sheet,id,updates){ return safePost({action:'update',sheet,id,updates}); }
+// ════════════════════════════════════════════
+//  ⚡ SPEED LAYER — Cache + Lazy Load + Background Refresh
+//  All 62 dbRead calls go through here automatically.
+//  FIX 1: In-memory cache — data fetched once, reused instantly
+//  FIX 2: Lazy load — only fetch a sheet when first needed
+//  FIX 3: Background refresh — stale data shows instantly, fresh data
+//          arrives silently in the background without blocking the UI
+//  FIX 4: Optimistic UI — writes update cache immediately, don't wait
+// ════════════════════════════════════════════
+
+const _cache = {};            // { sheetName: { data: [], ts: timestamp } }
+const _pending = {};          // { sheetName: Promise } — deduplicates concurrent fetches
+const CACHE_TTL = 90000;      // 90 seconds — data older than this triggers background refresh
+const CACHE_STALE = 15000;    // 15 seconds — data newer than this is always served from cache
+
+// Sheets that change frequently — shorter TTL, refresh more aggressively
+const VOLATILE_SHEETS = ['Messages','Notifications','ActivityLog','Emails'];
+// Sheets that rarely change — serve from cache longer
+const STABLE_SHEETS   = ['Users','Students','Programs','ExamPrograms','Settings'];
+
+function _ttl(sheet) {
+  if (VOLATILE_SHEETS.includes(sheet)) return 20000;   // 20s for live data
+  if (STABLE_SHEETS.includes(sheet))   return 300000;  // 5 min for stable data
+  return CACHE_TTL;
+}
+
+// Fetch from server and update cache (used internally)
+async function _fetchSheet(sheet) {
+  if (_pending[sheet]) return _pending[sheet]; // deduplicate concurrent requests
+  const dot = document.getElementById('sync-dot');
+  if (dot) dot.classList.add('active');
+  _pending[sheet] = safePost({action:'read', sheet})
+    .then(r => {
+      const data = Array.isArray(r) ? r : [];
+      _cache[sheet] = { data, ts: Date.now() };
+      delete _pending[sheet];
+      if (Object.keys(_pending).length === 0 && dot) dot.classList.remove('active');
+      return data;
+    })
+    .catch(() => {
+      delete _pending[sheet];
+      if (Object.keys(_pending).length === 0 && dot) dot.classList.remove('active');
+      return _cache[sheet]?.data || [];
+    });
+  return _pending[sheet];
+}
+
+// ── MAIN READ FUNCTION (replaces old dbRead) ──
+// Returns cached data instantly if fresh, otherwise fetches.
+// If data is stale (but exists), returns it immediately AND refreshes in background.
+async function dbRead(sheet) {
+  if (DEMO_MODE) { const r=await safePost({action:'read',sheet}); return Array.isArray(r)?r:[]; }
+
+  const cached = _cache[sheet];
+  const age = cached ? Date.now() - cached.ts : Infinity;
+  const ttl = _ttl(sheet);
+
+  // ① Data is fresh — return instantly from cache
+  if (cached && age < CACHE_STALE) {
+    return cached.data;
+  }
+
+  // ② Data is stale but exists — return it NOW, refresh silently in background
+  if (cached && age < ttl * 3) {
+    _fetchSheet(sheet); // fire-and-forget background refresh
+    return cached.data; // instant return — UI never waits
+  }
+
+  // ③ No cache or very old — must fetch (first load of this sheet)
+  return _fetchSheet(sheet);
+}
+
+// ── CACHE INVALIDATION ── call after writes so next read gets fresh data
+function _invalidate(sheet) {
+  delete _cache[sheet];
+}
+
+// ── WRITE — optimistic: update cache immediately, then sync to server ──
+async function dbWrite(sheet, row) {
+  // Optimistically add to local cache so UI reflects change instantly
+  if (_cache[sheet]) {
+    _cache[sheet].data = [..._cache[sheet].data, row];
+  }
+  const result = await safePost({action:'write', sheet, row});
+  if (!result?.success) _invalidate(sheet); // rollback on failure
+  return result;
+}
+
+// ── UPDATE — optimistic: patch cache immediately ──
+async function dbUpdate(sheet, id, updates) {
+  // Optimistically patch the cached row so UI reflects change instantly
+  if (_cache[sheet]) {
+    _cache[sheet].data = _cache[sheet].data.map(r =>
+      String(r.id) === String(id) ? {...r, ...updates} : r
+    );
+  }
+  const result = await safePost({action:'update', sheet, id, updates});
+  if (!result?.success) _invalidate(sheet); // rollback on failure
+  return result;
+}
+
+// ── CACHE WARMING — preload the most-used sheets right after login ──
+// Runs in background so login itself is not delayed
+async function warmCache() {
+  if (DEMO_MODE) return;
+  const role = S.role;
+  // Always warm these core sheets
+  const core = ['Students','Users','Sponsorships'];
+  // Role-specific extras
+  const extras = {
+    admin:             ['Concerns','Content','ActivityLog','Notifications'],
+    cofounder:         ['Concerns','Content','ActivityLog'],
+    knosk_admin:       ['Concerns','Content'],
+    teacher:           ['ExerciseScores','Attendance'],
+    child_sponsorship: ['Sponsorships'],
+    knosk_programs:    ['Programs','Content'],
+    student:           ['ExerciseScores'],
+    sponsor:           ['Sponsorships'],
+  };
+  const sheets = [...core, ...(extras[role] || [])];
+  // Stagger requests 200ms apart — avoids hammering GAS simultaneously
+  for (const sheet of sheets) {
+    if (!_cache[sheet]) {
+      _fetchSheet(sheet);
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+}
+
+// ── KEEP-ALIVE PING — prevents GAS cold starts ──
+// Pings the backend every 4 minutes so it never goes to sleep
+function startKeepAlive() {
+  if (DEMO_MODE) return;
+  // Ping immediately to warm up, then every 4 minutes
+  setTimeout(() => {
+    safePost({action:'ping'}).catch(() => {});
+  }, 3000);
+  setInterval(() => {
+    safePost({action:'ping'}).catch(() => {});
+  }, 4 * 60 * 1000);
+}
 
 // ════════════════════════════════════════════
 //  UTILITIES
@@ -2635,6 +2773,9 @@ async function doLogin(){
   if(res.token){ _sessionToken=res.token; _sessionUserId=S.id; }
   sessionStorage.setItem('knosk_s',JSON.stringify(S));
   if(res.token){ sessionStorage.setItem('knosk_t',res.token); sessionStorage.setItem('knosk_u',S.id); }
+  // ⚡ Start keep-alive ping + background cache warming immediately after login
+  startKeepAlive();
+  warmCache(); // fire-and-forget — does not delay the welcome page
   showWelcomePage();
 }
 
@@ -5328,6 +5469,8 @@ window.addEventListener('load',()=>{
   const savedToken=sessionStorage.getItem('knosk_t');
   const savedUserId=sessionStorage.getItem('knosk_u');
   if(savedToken){ _sessionToken=savedToken; _sessionUserId=savedUserId; }
+  // ⚡ Restore keep-alive and warm cache on page reload
+  if(savedToken){ startKeepAlive(); warmCache(); }
   if(saved){try{const u=JSON.parse(saved);if(u?.id){S=u;if(S.activeRole)selectRole(S.activeRole);else showWelcomePage();}}catch(e){}}
   document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 });
