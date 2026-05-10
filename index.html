@@ -2023,4 +2023,570 @@ async function loadTeachersView(){
   const users=await dbRead('Users');const teachers=users.filter(u=>u.role==='teacher');
   $('teachers-tbody').innerHTML=teachers.map((t,i)=>{
     const subs=Object.keys(t.subjects||{}).map(c=>`<span class="badge b-blue" style="margin:1px;font-size:9.5px;">${c}</span>`).join(' ')||'—';
-    return`<tr><td>${i+1}</td><td><div style="display:flex;align-items:center;gap:7px;
+    return`<tr><td>${i+1}</td><td><div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#059669,#10B981);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:white;">${gi(t.name)}</div><div><div style="font-weight:700;">${t.name}</div><div style="font-size:10.5px;color:var(--muted);">${t.email}</div></div></div></td>
+    <td><span class="badge b-gold" style="font-size:10px;">${t.formClass||'—'}</span></td>
+    <td><div style="max-width:170px;">${subs}</div></td>
+    <td><span class="badge b-active">Active</span></td>
+    <td><button class="btn btn-xs btn-ghost" onclick="toast('Teacher profile — available in backend')">View</button></td></tr>`;
+  }).join('')||'<tr><td colspan="6"><div class="empty"><p>No teachers yet</p></div></td></tr>';
+}
+function filterTeachers(){}
+
+// ──────────────────────────────────────
+//  MY STUDENTS (Teacher)
+// ──────────────────────────────────────
+async function loadMyStudents(){
+  const myFormClass=S.formClass||'';const mySubjects=S.subjects||{};
+  const classes=[...new Set([...(myFormClass?[myFormClass]:[]),...Object.keys(mySubjects)])];
+  if(!classes.length){$('my-students-tabs').innerHTML='';$('my-students-content').innerHTML='<div class="empty"><p>No classes assigned yet.</p></div>';return;}
+  $('my-students-tabs').innerHTML=classes.map((c,i)=>`<button class="tab-btn${i===0?' active':''}" onclick="loadClassStudents('${c}',this)">${c}</button>`).join('');
+  loadClassStudents(classes[0]);
+}
+async function loadClassStudents(cls,btn){
+  if(btn){document.querySelectorAll('#my-students-tabs .tab-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+  const students=await dbRead('Students');const base=cls.replace(/[A-C]$/,'');const arm=cls.length>base.length?cls.slice(-1):'';
+  const mine=students.filter(s=>s.class===base&&(!arm||(s.arm||'A')===arm));
+  $('my-students-content').innerHTML=`<div class="card"><div class="card-header"><div class="card-title">${cls} — ${mine.length} Students</div></div><div class="card-body">
+    ${mine.map(s=>`<div class="list-item"><div class="li-av">${gi(s.name)}</div><div class="li-info"><div class="li-name">${s.name}</div><div class="li-sub">${s.gender==='M'?'♂':'♀'} · ${s.points||0}pts · Att:${s.attendancePct||0}%</div></div>
+    <span class="badge ${s.status==='active'?'b-active':s.status==='suspended'?'b-suspended':'b-pending'}">${s.status==='suspended'?'🚫 SUSP':s.status}</span>
+    ${s.status==='pending'?`<button class="btn btn-xs btn-green" onclick="approveStudent('${s.id}')">✓</button>`:''}</div>`).join('')||'<div class="empty"><p>No students in this class yet</p></div>'}
+  </div></div>`;
+}
+
+// ──────────────────────────────────────
+//  MY SUBJECTS (Student)
+// ──────────────────────────────────────
+async function loadMySubjects(){
+  const cls=S.class||'Jss1';let subs=[];
+  if(cls.startsWith('Ss'))SS_DEPTS.forEach(d=>{subs.push(...(SUBJECTS[`${cls}-${d}`]||[]))});
+  else subs=SUBJECTS[cls]||SUBJECTS.Jss1;
+  const uniq=[...new Set(subs)];
+  $('subject-tabs').innerHTML=uniq.slice(0,8).map((s,i)=>`<button class="tab-btn${i===0?' active':''}" onclick="loadSubjectContent('${s}',this)">${s}</button>`).join('');
+  if(uniq.length)loadSubjectContent(uniq[0]);
+}
+async function loadSubjectContent(subject,btn){
+  if(btn){document.querySelectorAll('#subject-tabs .tab-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+  $('subject-content-area').innerHTML=`<div class="card"><div class="card-header"><div class="card-title">📚 ${subject}</div><span class="badge b-blue">${S.class||'—'}${S.arm||''}</span></div><div class="card-body"><div class="empty"><div class="empty-icon">📋</div><p>No content uploaded for <strong>${subject}</strong> yet. Your teacher will upload content soon.</p></div></div></div>`;
+}
+
+// ──────────────────────────────────────
+//  EXERCISE
+// ──────────────────────────────────────
+function loadExercise(){
+  const key=`knosk_ex_${today()}_${S.id}`;
+  if(localStorage.getItem(key)){$('exercise-done').style.display='flex';$('exercise-area').style.display='none';return;}
+  $('exercise-done').style.display='none';$('exercise-area').style.display='block';
+  $('ex-date').textContent='Date: '+fmtDate(today());_exSel=[null,null];
+  const i1=Math.floor(Date.now()/86400000)%EXERCISE_BANK.length;const i2=(i1+1)%EXERCISE_BANK.length;
+  _exData=[EXERCISE_BANK[i1],EXERCISE_BANK[i2]];
+  $('ex-subject').textContent=_exData[0].subject.toUpperCase();
+  renderQ(0);renderQ(1);$('ex-submit-btn').disabled=true;$('ex-result').style.display='none';
+}
+function renderQ(qi){const q=_exData[qi];$(`ex-q${qi+1}`).textContent=q.q;$(`ex-opts${qi+1}`).innerHTML=q.opts.map((o,oi)=>`<div class="ex-option" id="exo-${qi}-${oi}" onclick="pickOpt(${qi},${oi})"><div class="ex-opt-letter">${String.fromCharCode(65+oi)}</div>${o}</div>`).join('');}
+function pickOpt(qi,oi){_exSel[qi]=oi;document.querySelectorAll(`#ex-opts${qi+1} .ex-option`).forEach((el,i)=>el.classList.toggle('selected',i===oi));$('ex-submit-btn').disabled=_exSel.some(s=>s===null);$('ex-score-disp').textContent=_exSel.filter(s=>s!==null).length*10;}
+async function submitExercise(){
+  const btn=$('ex-submit-btn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span>';
+  let score=0;
+  _exData.forEach((q,qi)=>{const ok=_exSel[qi]===q.correct;if(ok)score+=10;document.querySelectorAll(`#ex-opts${qi+1} .ex-option`).forEach((el,i)=>{if(i===q.correct)el.classList.add('correct');else if(i===_exSel[qi]&&!ok)el.classList.add('wrong');el.style.pointerEvents='none';});});
+  await dbWrite('ExerciseScores',{id:uid(),studentId:S.id,studentName:S.name,date:today(),score,submittedAt:new Date().toISOString()});
+  localStorage.setItem(`knosk_ex_${today()}_${S.id}`,score);
+  const res=$('ex-result');res.style.display='flex';res.className='alert '+(score>=10?'al-ok':'al-warn');
+  res.innerHTML=`<span>${score>=10?'🎉':'📚'}</span><span>You scored <strong>${score}/20 points</strong>. ${score>=10?'Excellent!':'Keep practising!'}</span>`;
+  btn.innerHTML='Submitted ✓';
+}
+
+// ──────────────────────────────────────
+//  LEADERBOARD
+// ──────────────────────────────────────
+async function loadLeaderboardFull(){
+  const lb=await dbRead('ExerciseScores');
+  $('lb-full').innerHTML=lb.map((s,i)=>{const isMe=(s.userId||s.id)===S.id;return`<div class="lb-item${isMe?' me':''}">
+    <div class="lb-rank ${i===0?'r1':i===1?'r2':i===2?'r3':'rn'}">${['🥇','🥈','🥉'][i]||i+1}</div>
+    <div class="lb-av">${gi(s.name||'S')}</div>
+    <div style="flex:1;"><div class="lb-name">${s.name||'—'}${isMe?' <span style="opacity:.4;font-size:9px;">(you)</span>':''}</div><div class="lb-class">${s.class||'—'}${s.arm||''}</div></div>
+    <div class="lb-score">${s.total||s.points||0}</div>
+  </div>`;}).join('')||'<div class="lb-footer">No scores yet — start the Daily Exercise!</div>';
+  const me=lb.findIndex(s=>(s.userId||s.id)===S.id);
+  $('lb-footer-msg').textContent=me>=0?`You are ranked #${me+1} with ${lb[me]?.total||0} points`:'Complete Daily Exercise to appear on the leaderboard!';
+}
+function switchLbTab(tab,el){document.querySelectorAll('.lb-wrap .tab-btn,.lb-wrap button[onclick]').forEach(b=>b.classList?.remove?.('active'));if(el)el.classList.add('active');loadLeaderboardFull();}
+
+// ──────────────────────────────────────
+//  ATTENDANCE
+// ──────────────────────────────────────
+async function loadClassForAttendance(){
+  const cls=$('att-class').value;if(!cls)return;
+  const students=await dbRead('Students');const mine=students.filter(s=>s.class===cls&&s.status==='active');
+  if(!mine.length){$('att-table-area').innerHTML='<div class="empty"><p>No active students in '+cls+'</p></div>';return;}
+  $('att-pres').textContent=mine.length;$('att-abs').textContent='0';$('att-boys').textContent=mine.filter(s=>s.gender==='M').length;$('att-girls').textContent=mine.filter(s=>s.gender==='F').length;
+  $('att-table-area').innerHTML=`<table class="data-table" style="width:100%;"><thead><tr><th>#</th><th>Name</th><th>Class/Arm</th><th>🌅 Morning</th><th>🌇 Afternoon</th></tr></thead>
+  <tbody>${mine.map((s,i)=>`<tr><td>${i+1}</td><td><strong>${s.name}</strong></td><td>${s.class}${s.arm||''}</td>
+    <td><select id="am-${s.id}" style="padding:4px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;" onchange="updateAttCount()"><option value="P" selected>P</option><option value="A">A</option></select></td>
+    <td><select id="aa-${s.id}" style="padding:4px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;" onchange="updateAttCount()"><option value="P" selected>P</option><option value="A">A</option></select></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function updateAttCount(){
+  const cls=$('att-class').value;if(!cls)return;const students=await dbRead('Students');const mine=students.filter(s=>s.class===cls&&s.status==='active');
+  let p=0,b=0,g=0;mine.forEach(s=>{const m=document.getElementById('am-'+s.id)?.value;if(m==='P'){p++;if(s.gender==='M')b++;else g++;}});
+  $('att-pres').textContent=p;$('att-abs').textContent=mine.length-p;$('att-boys').textContent=b;$('att-girls').textContent=g;
+}
+async function saveAttendance(){
+  const cls=$('att-class').value;const session=$('att-session').value;if(!cls){toast('Select a class first','warn');return;}
+  const students=await dbRead('Students');const mine=students.filter(s=>s.class===cls&&s.status==='active');let pres=0;
+  for(const s of mine){const m=document.getElementById('am-'+s.id)?.value||'A';const a=document.getElementById('aa-'+s.id)?.value||'A';if(m==='P'||a==='P')pres++;
+    await dbWrite('Attendance',{id:uid(),studentId:s.id,studentName:s.name,class:cls,arm:s.arm||'',date:today(),morning:m,afternoon:a,session,gender:s.gender,markedBy:S.id,markedByName:S.name,createdAt:new Date().toISOString()});}
+  toast(`✅ Attendance saved — ${pres}/${mine.length} present`);
+}
+function exportAttendancePDF(){const w=window.open('','_blank');w.document.write(`<html><body><h2>Knosk EyeQ — Attendance · ${fmtDate(today())}</h2><p>By: ${S.name}</p></body></html>`);w.document.close();w.print();}
+
+// ──────────────────────────────────────
+//  CONTENT UPLOAD
+// ──────────────────────────────────────
+async function submitContent(){
+  const title=$('cu-title').value.trim();const content=$('cu-content').value.trim();const msg=$('cu-msg');
+  if(!title||!content){msg.innerHTML='<div class="alert al-err">Title and content are required.</div>';return;}
+  await dbWrite('Content',{id:uid(),subject:$('cu-subject').value,class:$('cu-class').value,type:$('cu-type').value,title,content,link:$('cu-link').value.trim(),week:$('cu-week').value.trim(),uploadedBy:S.id,uploadedByName:S.name,status:'pending',createdAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">✅ Uploaded! Pending Knosk Admin approval.</div>';setTimeout(()=>msg.innerHTML='',3000);
+}
+
+// ──────────────────────────────────────
+//  CONCERNS
+// ──────────────────────────────────────
+async function submitConcern(){
+  const title=$('cc-title').value.trim();const detail=$('cc-detail').value.trim();const msg=$('cc-msg');
+  if(!title||!detail){msg.innerHTML='<div class="alert al-err">Title and details required.</div>';return;}
+  await dbWrite('Concerns',{id:uid(),category:$('cc-cat').value,priority:$('cc-pri').value,title,detail,raisedBy:S.id,raisedByName:S.name,role:S.role,status:'open',createdAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">🚨 Submitted and escalated.</div>';toast('🚨 Concern escalated to management');
+  setTimeout(()=>{msg.innerHTML='';$('cc-title').value='';$('cc-detail').value='';loadMyConcerns();},3000);
+}
+async function loadMyConcerns(){
+  const c=await dbRead('Concerns');$('my-concerns').innerHTML=c.filter(x=>x.raisedBy===S.id).map(c=>`<div class="concern-card prio-${c.priority}"><div class="concern-title">${c.title}</div><div class="concern-meta">${c.category} · <span class="badge b-${c.status==='open'?'red':'active'}">${c.status}</span> · ${fmtDate(c.createdAt)}</div></div>`).join('')||'<div class="empty"><p>No concerns submitted yet</p></div>';
+}
+
+// ──────────────────────────────────────
+//  ESCALATIONS
+// ──────────────────────────────────────
+async function loadEscalations(){
+  const concerns=await dbRead('Concerns');
+  $('escalations-list').innerHTML=concerns.map(c=>`<div class="concern-card prio-${c.priority}">
+    <div style="display:flex;justify-content:space-between;margin-bottom:7px;">
+      <div><div class="concern-title">${c.title}</div><div class="concern-meta">${c.raisedByName} · ${c.category} · ${fmtDate(c.createdAt)}</div></div>
+      <span class="badge b-${c.priority==='high'?'red':c.priority==='medium'?'gold':'blue'}">${c.priority}</span>
+    </div>
+    <p style="font-size:12.5px;color:var(--text2);margin-bottom:9px;line-height:1.55;">${c.detail}</p>
+    <div style="display:flex;gap:7px;"><button class="btn btn-xs btn-green" onclick="resolveConcern('${c.id}')">✓ Resolve</button><button class="btn btn-xs btn-gold" onclick="toast('Escalated to Co-founders')">↑ Escalate</button><span class="badge b-${c.status==='open'?'red':'active'}">${c.status}</span></div>
+  </div>`).join('')||'<div class="empty"><div class="empty-icon">🚨</div><p>No concerns</p></div>';
+}
+async function resolveConcern(id){await dbUpdate('Concerns',id,{status:'resolved',resolvedBy:S.name,resolvedAt:new Date().toISOString()});loadEscalations();toast('✅ Concern resolved');}
+
+// ──────────────────────────────────────
+//  APPROVALS
+// ──────────────────────────────────────
+async function loadApprovals(){
+  const [content,progs]=await Promise.all([dbRead('Content'),dbRead('Programs')]);
+  const pending=[...content.filter(c=>c.status==='pending').map(c=>({...c,_type:'Content',_detail:c.type+' · '+c.subject})),...progs.filter(p=>p.status==='pending').map(p=>({...p,_type:'Program',_detail:p.category}))];
+  $('approvals-list').innerHTML=pending.map(item=>`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--gold);">
+    <div class="card-header"><div><div class="card-title">${item.title||item.name}</div><div class="card-sub">By ${item.uploadedByName||item.createdByName||'—'} · ${item._type} · ${item._detail}</div></div><span class="badge b-pending">Pending</span></div>
+    ${item.content?`<div class="card-body" style="padding-top:0;font-size:12.5px;color:var(--text2);">${item.content.slice(0,180)}…</div>`:''}
+    <div class="card-footer"><div style="display:flex;gap:7px;"><button class="btn btn-xs btn-green" onclick="approveItem('${item.id}','${item._type}')">✓ Approve</button><button class="btn btn-xs btn-red" onclick="rejectItem('${item.id}','${item._type}')">✕ Reject</button></div></div>
+  </div>`).join('')||'<div class="empty"><div class="empty-icon">✅</div><p>No pending approvals!</p></div>';
+}
+async function approveItem(id,type){await dbUpdate(type==='Content'?'Content':'Programs',id,{status:'approved',approvedBy:S.name,approvedAt:new Date().toISOString()});loadApprovals();toast('✅ Approved');}
+async function rejectItem(id,type){const reason=prompt('Rejection reason:');await dbUpdate(type==='Content'?'Content':'Programs',id,{status:'rejected',rejectedBy:S.name,rejectionReason:reason||'',rejectedAt:new Date().toISOString()});loadApprovals();}
+
+// ──────────────────────────────────────
+//  ANALYTICS
+// ──────────────────────────────────────
+async function loadAnalytics(){
+  const [students,users,spon]=await Promise.all([dbRead('Students'),dbRead('Users'),dbRead('Sponsorships')]);
+  const teachers=users.filter(u=>u.role==='teacher');const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  $('analytics-stats').innerHTML=[{icon:'🎓',num:students.filter(s=>s.status==='active').length,lbl:'Active Students',css:'sc-blue'},{icon:'🚫',num:students.filter(s=>s.status==='suspended').length,lbl:'Suspended',css:'sc-red'},{icon:'👩‍🏫',num:teachers.length,lbl:'Teachers',css:'sc-green'},{icon:'📅',num:'91%',lbl:'Avg Attendance',css:'sc-teal'},{icon:'❤️',num:Math.round(sponsored.length/Math.max(students.length,1)*100)+'%',lbl:'Sponsorship Rate',css:'sc-pink'},{icon:'⭐',num:'79',lbl:'Avg Score',css:'sc-gold'}].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
+  $('teacher-activity-list').innerHTML=teachers.map(t=>`<div class="list-item" style="margin-bottom:5px;"><div class="li-av" style="background:linear-gradient(135deg,#059669,#10B981);">${gi(t.name)}</div><div class="li-info"><div class="li-name">${t.name}</div><div class="li-sub">Form: ${t.formClass||'—'} · Active today</div></div><span class="badge b-active">Active</span></div>`).join('')||'<div class="empty"><p>No teachers yet</p></div>';
+  setTimeout(()=>{drawBarChart('chart-class-perf',CLASSES.map(c=>({label:c,val:Math.floor(65+Math.random()*30)})));drawLineChart('chart-att-trend');drawDonutChart('chart-spon-donut',sponsored.length,students.length-sponsored.length);$('spon-donut-legend').innerHTML=`<span class="badge b-green">✅ ${sponsored.length} Sponsored</span> <span class="badge b-red" style="margin-left:5px;">⚠️ ${students.length-sponsored.length} Need Sponsor</span>`;},200);
+}
+
+// ──────────────────────────────────────
+//  SPONSORSHIP
+// ──────────────────────────────────────
+async function loadSponsorship(){
+  const [students,spon]=await Promise.all([dbRead('Students'),dbRead('Sponsorships')]);
+  _allStudents=students;_allSponships=spon;
+  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  $('spon-stats').innerHTML=[{icon:'🎓',num:students.length,lbl:'Total Students',css:'sc-blue'},{icon:'✅',num:sponsored.length,lbl:'Active Sponsorship',css:'sc-green'},{icon:'⚠️',num:students.length-sponsored.length,lbl:'No Sponsor Yet',css:'sc-red'},{icon:'🤝',num:[...new Set(spon.map(s=>s.sponsorId))].length,lbl:'Sponsors',css:'sc-teal'},{icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Monthly Funding',css:'sc-gold'},{icon:'🔴',num:students.filter(s=>(s.attendancePct||100)<80).length,lbl:'At-Risk',css:'sc-orange'}].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
+  renderSponStudents(students,spon);renderSponsorDir(spon);renderAtRisk(students,spon);
+}
+function getSponStatus(sp){if(!sp)return{label:'No Sponsor',cls:'b-unsponsored'};if(sp.status==='pending')return{label:'⏳ Pending',cls:'b-pending-spon'};if(sp.endDate){const d=Math.ceil((new Date(sp.endDate)-new Date())/(864e5));if(d<0)return{label:'🔴 Needs Renewal',cls:'b-renewal-spon'};if(d<=14)return{label:`⚠️ ${d}d left`,cls:'b-pending-spon'};}return{label:'✅ Active',cls:'b-active-spon'};}
+function getRenewalDays(sp){if(!sp||!sp.endDate)return null;return Math.ceil((new Date(sp.endDate)-new Date())/(864e5));}
+function renderSponStudents(students,spon){
+  $('spon-students-list').innerHTML=students.map(s=>{const sp=spon.find(x=>x.studentId===s.id&&x.status==='active');const st=getSponStatus(sp);const atRisk=(s.attendancePct||100)<80;
+    return`<div class="list-item ${atRisk?'risk-high':''}" style="margin-bottom:7px;"><div class="li-av">${gi(s.name)}</div><div class="li-info"><div class="li-name">${s.name} <span class="badge ${st.cls}" style="font-size:9.5px;">${st.label}</span></div><div class="li-sub">${s.class||'—'}${s.arm||''} · Att:${s.attendancePct||0}%${sp?' · '+sp.sponsorName:''}</div></div>${atRisk?'<span>⚠️</span>':''}${!sp?`<button class="btn btn-xs btn-gold" onclick="openModal('modal-assign-sponsor')">+ Assign</button>`:''}</div>`;}).join('');
+}
+function renderSponsorDir(spon){
+  const byId={};spon.forEach(s=>{if(!byId[s.sponsorId])byId[s.sponsorId]={id:s.sponsorId,name:s.sponsorName,students:[],total:0,start:s.startDate};byId[s.sponsorId].students.push(s);byId[s.sponsorId].total+=Number(s.amount||0);});
+  $('sponsor-dir-list').innerHTML=Object.values(byId).map(sp=>`<div class="card" style="margin-bottom:11px;cursor:pointer;overflow:hidden;" onclick="viewSponsorDetail('${sp.id}')">
+    <div class="sdc-header"><div class="sdc-av">${gi(sp.name)}</div><div><div class="sdc-name">${sp.name}</div><div class="sdc-meta">${sp.students.length} student(s) · ₦${sp.total.toLocaleString()}/term · Since ${fmtDate(sp.start)}</div></div><div style="margin-left:auto;"><span style="font-size:11px;color:rgba(255,255,255,.5);">Click for full record →</span></div></div>
+    <div class="sdc-stats"><div class="sdc-stat"><div class="sdc-num">${sp.students.length}</div><div class="sdc-lbl">Students</div></div><div class="sdc-stat"><div class="sdc-num">₦${sp.total.toLocaleString()}</div><div class="sdc-lbl">Per Term</div></div><div class="sdc-stat"><div class="sdc-num">₦${(sp.total*3).toLocaleString()}</div><div class="sdc-lbl">Est. Annual</div></div><div class="sdc-stat"><div class="sdc-num">${sp.students.filter(s=>getRenewalDays(s)!==null&&getRenewalDays(s)<0).length>0?'🔴':'✅'}</div><div class="sdc-lbl">Status</div></div></div>
+  </div>`).join('')||'<div class="empty"><p>No sponsors yet</p></div>';
+}
+function renderAtRisk(students,spon){
+  const sp=spon.filter(s=>s.status==='active').map(s=>s.studentId);const at=students.filter(s=>(s.attendancePct||100)<80||(s.points||100)<40);
+  $('spon-atrisk-list').innerHTML=at.map(s=>`<div class="list-item risk-${(s.attendancePct||100)<70?'high':'med'}"><div class="li-av">${gi(s.name)}</div><div class="li-info"><div class="li-name">${s.name}</div><div class="li-sub">${s.class} · Att:${s.attendancePct||0}% · ${s.points||0}pts</div></div><span class="badge ${sp.includes(s.id)?'b-green':'b-red'}">${sp.includes(s.id)?'Sponsored':'No Sponsor'}</span></div>`).join('')||'<div class="empty"><p>No at-risk students!</p></div>';
+}
+function switchSponTab(tab,el){document.querySelectorAll('#view-sponsorship .tab-btn').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');$('spon-students-tab').style.display=tab==='students'?'block':'none';$('spon-sponsors-tab').style.display=tab==='sponsors'?'block':'none';$('spon-atrisk-tab').style.display=tab==='atrisk'?'block':'none';}
+function filterSponStudents(){const q=$('spon-search').value.toLowerCase();const status=$('spon-status-filter').value;const sp=_allSponships.filter(s=>s.status==='active').map(s=>s.studentId);renderSponStudents(_allStudents.filter(s=>(!q||s.name?.toLowerCase().includes(q))&&(!status||(status==='sponsored'&&sp.includes(s.id))||(status==='unsponsored'&&!sp.includes(s.id)))),_allSponships);}
+async function viewSponsorDetail(sponsorId){
+  const [spon,users,students,payments]=await Promise.all([dbRead('Sponsorships'),dbRead('Users'),dbRead('Students'),dbRead('Payments')]);
+  const ts=spon.filter(s=>s.sponsorId===sponsorId);const su=users.find(u=>u.id===sponsorId)||{name:ts[0]?.sponsorName||'—',email:'—'};const tp=payments.filter(p=>p.sponsorId===sponsorId);const totalPaid=tp.filter(p=>p.status==='paid').reduce((a,p)=>a+Number(p.amount||0),0);
+  $('sponsor-detail-content').innerHTML=`<div class="card" style="overflow:hidden;margin-bottom:14px;">
+    <div class="sdc-header"><div class="sdc-av">${gi(su.name)}</div><div><div class="sdc-name">${su.name}</div><div class="sdc-meta">📧 ${su.email} · 📞 ${su.phone||'—'}</div></div></div>
+    <div class="sdc-stats"><div class="sdc-stat"><div class="sdc-num">${ts.length}</div><div class="sdc-lbl">Students</div></div><div class="sdc-stat"><div class="sdc-num">₦${totalPaid.toLocaleString()}</div><div class="sdc-lbl">Total Paid</div></div><div class="sdc-stat"><div class="sdc-num">${tp.filter(p=>p.status==='pending').length}</div><div class="sdc-lbl">Pending</div></div><div class="sdc-stat"><div class="sdc-num">${ts.filter(s=>getRenewalDays(s)!==null&&getRenewalDays(s)<0).length}</div><div class="sdc-lbl">Needs Renewal</div></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;">
+    <div class="card"><div class="card-header"><div class="card-title">📊 Student Progress</div></div><div class="card-body">${ts.map(sp=>{const st=students.find(s=>s.id===sp.studentId)||{};return`<div style="margin-bottom:11px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:700;margin-bottom:3px;"><span>${sp.studentName}</span><span style="color:var(--blue)">${st.points||0}pts</span></div><div class="prog-bar-bg"><div class="prog-bar pb-blue" style="width:${Math.min(st.points||0,100)}%;"></div></div><div style="font-size:10.5px;color:var(--muted);margin-top:2px;">Att: ${st.attendancePct||0}% · ${st.class||'—'}${st.arm||''}</div></div>`;}).join('')}</div></div>
+    <div class="card"><div class="card-header"><div class="card-title">💳 Payment Timeline</div></div><div class="card-body"><div class="payment-timeline">${tp.map(p=>`<div class="pt-item"><div class="pt-dot pt-dot-${p.status==='paid'?'paid':'pending'}"></div><div style="display:flex;justify-content:space-between;"><div><div class="pt-label">${p.studentName||'—'} — ${p.term}</div><div class="pt-meta">${fmtDate(p.paymentDate)} · Ref: ${p.reference||'—'} · <span class="badge ${p.status==='paid'?'b-active':'b-pending'}">${p.status}</span></div></div><div class="pt-amount">₦${Number(p.amount||0).toLocaleString()}</div></div></div>`).join('')||'<div class="empty" style="padding:14px;"><p>No payment records yet</p></div>'}</div></div></div>
+  </div>
+  <div class="card" style="margin-top:13px;"><div class="card-header"><div class="card-title">📋 All Sponsorship Records</div></div>
+  <div class="data-table-wrap"><table class="data-table"><thead><tr><th>#</th><th>Student</th><th>Class</th><th>Start</th><th>End</th><th>Type</th><th>Amount</th><th>Status</th></tr></thead>
+  <tbody>${ts.map((sp,i)=>{const st=students.find(s=>s.id===sp.studentId)||{};return`<tr><td>${i+1}</td><td><strong>${sp.studentName}</strong></td><td>${st.class||'—'}${st.arm||''}</td><td>${fmtDate(sp.startDate)}</td><td>${fmtDate(sp.endDate)}</td><td>${sp.sponsorshipType==='year'?'Annual':'Per Term'}</td><td>₦${Number(sp.amount||0).toLocaleString()}</td><td><span class="badge ${sp.status==='active'?'b-active-spon':'b-pending-spon'}">${sp.status}</span></td></tr>`;}).join('')}</tbody></table></div></div>`;
+  showView('sponsor-detail');
+}
+
+// ──────────────────────────────────────
+//  MY SPONSORED (Sponsor Transparency)
+// ──────────────────────────────────────
+async function loadMySponsoredTab(tab){
+  const [spon,students,payments,caScores]=await Promise.all([dbRead('Sponsorships'),dbRead('Students'),dbRead('Payments'),dbRead('CaScores')]);
+  const mine=spon.filter(s=>s.sponsorId===S.id);const myPay=payments.filter(p=>p.sponsorId===S.id);
+  if(tab==='overview'){
+    $('my-sponsored-content').innerHTML=mine.map(sp=>{const st=students.find(s=>s.id===sp.studentId)||{};return`<div style="background:white;border-radius:var(--r);border:1px solid var(--border2);box-shadow:var(--sh);overflow:hidden;margin-bottom:14px;">
+      <div style="background:var(--g-gold);padding:18px;display:flex;align-items:center;gap:13px;"><div style="width:52px;height:52px;border-radius:50%;border:3px solid rgba(255,255,255,.3);background:var(--g-navy);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:white;">${gi(sp.studentName||'S')}</div><div><div style="font-size:17px;font-weight:800;color:white;">${sp.studentName}</div><div style="font-size:11.5px;color:rgba(255,255,255,.8);">Class: ${st.class||'—'}${st.arm||''} · Since ${fmtDate(sp.startDate)}</div></div><div style="margin-left:auto;"><div style="font-size:13px;font-weight:800;color:white;">₦${Number(sp.amount||0).toLocaleString()}/${sp.sponsorshipType==='year'?'yr':'term'}</div></div></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);">
+        <div style="padding:13px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--blue);">${st.points||0}</div><div style="font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--muted);">Exercise Pts</div></div>
+        <div style="padding:13px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--green);">${st.attendancePct||0}%</div><div style="font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--muted);">Attendance</div></div>
+        <div style="padding:13px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:${(st.attendancePct||0)>=80?'var(--green)':'var(--red)'};">${(st.attendancePct||0)>=80?'✅':'⚠️'}</div><div style="font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--muted);">Status</div></div>
+        <div style="padding:13px;text-align:center;"><span class="badge b-active-spon">✅ Active</span></div>
+      </div></div>`;}).join('')||'<div class="empty"><div class="empty-icon">🤝</div><p>No students assigned yet.</p></div>';
+  }else if(tab==='progress'){
+    $('my-sponsored-content').innerHTML=mine.map(sp=>{const myCA=caScores.filter(c=>c.studentId===sp.studentId);return`<div class="card" style="margin-bottom:14px;"><div class="card-header"><div class="card-title">📈 ${sp.studentName}</div></div><div class="card-body">
+      ${['1st Term','2nd Term','3rd Term'].map(term=>{const tCA=myCA.filter(c=>c.term===term);if(!tCA.length)return`<div style="padding:9px;color:var(--muted);font-size:12.5px;">📋 ${term}: Scores not yet available</div>`;
+      const avg=Math.round(tCA.reduce((a,c)=>a+Number(c.total||0),0)/tCA.length);const g=getCAGrade(avg);
+      return`<div style="margin-bottom:12px;padding:12px;background:var(--bg2);border-radius:var(--r-sm);"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>${term}</strong><div style="display:flex;gap:7px;align-items:center;"><span style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--blue);">${avg}%</span><span class="badge ${avg>=50?'b-active':'b-red'}">${avg>=50?'PASS':'BELOW PASS'}</span></div></div>
+      ${tCA.map(c=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px dashed var(--border2);"><span>${c.subject}</span><span style="font-weight:700;">${c.total||0}/100 <span class="${getCAGrade(Number(c.total||0)).css}">(${getCAGrade(Number(c.total||0)).g})</span></span></div>`).join('')}</div>`;}).join('')}
+    </div></div>`;}).join('')||'<div class="empty"><p>No students assigned.</p></div>';
+  }else if(tab==='payments'){
+    $('my-sponsored-content').innerHTML=`<div class="card"><div class="card-header"><div class="card-title">💳 My Payment History</div><span class="badge b-active">Total Paid: ₦${myPay.filter(p=>p.status==='paid').reduce((a,p)=>a+Number(p.amount||0),0).toLocaleString()}</span></div>
+    <div class="card-body"><div class="payment-timeline">${myPay.map(p=>`<div class="pt-item"><div class="pt-dot pt-dot-${p.status==='paid'?'paid':'pending'}"></div><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><div class="pt-label">${p.studentName||'—'} — ${p.term}, ${p.session}</div><div class="pt-meta">${p.status==='paid'?'✅ Confirmed: '+fmtDate(p.paymentDate):'⏳ Pending'} · Ref: ${p.reference||'—'}${p.confirmedBy?' · By: '+p.confirmedBy:''}</div></div><div style="text-align:right;"><div class="pt-amount">₦${Number(p.amount||0).toLocaleString()}</div><span class="badge ${p.status==='paid'?'b-active':'b-pending'}">${p.status}</span></div></div></div>`).join('')||'<div class="empty" style="padding:14px;"><p>No payments yet.</p></div>'}</div></div></div>`;
+  }else{
+    $('my-sponsored-content').innerHTML=`<div class="card"><div class="card-header"><div class="card-title">📋 Term Impact Reports</div></div><div class="card-body"><div class="alert al-info" style="margin-bottom:12px;">Monthly impact reports are generated by the Child Sponsorship team.</div>
+    ${mine.map(sp=>{const st=students.find(s=>s.id===sp.studentId)||{};const myCA=caScores.filter(c=>c.studentId===sp.studentId);return`<div style="border:1px solid var(--border2);border-radius:var(--r);padding:14px;margin-bottom:11px;"><div style="font-size:14px;font-weight:800;margin-bottom:7px;">📋 ${sp.studentName}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12.5px;"><div><strong>Class:</strong> ${st.class||'—'}${st.arm||''}</div><div><strong>Attendance:</strong> <span style="color:${(st.attendancePct||0)>=80?'var(--green)':'var(--red)'}">${st.attendancePct||0}%</span></div><div><strong>CA Subjects:</strong> ${myCA.length}</div><div><strong>Avg CA:</strong> ${myCA.length?Math.round(myCA.reduce((a,c)=>a+Number(c.total||0),0)/myCA.length):'—'}%</div><div><strong>Exercise Pts:</strong> ${st.points||0}</div><div><strong>Sponsorship:</strong> <span class="badge ${getSponStatus(sp).cls}">${getSponStatus(sp).label}</span></div></div></div>`;}).join('')||'<div class="empty"><p>No students assigned.</p></div>'}
+    </div></div>`;
+  }
+}
+function switchSponsorTab(tab,el){document.querySelectorAll('#view-my-sponsored .tab-btn').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');loadMySponsoredTab(tab);}
+function exportSponsorReport(){toast('📄 PDF export available in full deployment');}
+
+// ──────────────────────────────────────
+//  PAYMENTS
+// ──────────────────────────────────────
+async function loadPayments(){
+  const payments=await dbRead('Payments');const role=S.activeRole||S.role;
+  _allPayments=role==='sponsor'?payments.filter(p=>p.sponsorId===S.id):payments;
+  const paid=_allPayments.filter(p=>p.status==='paid');const pending=_allPayments.filter(p=>p.status==='pending');
+  $('payment-stats').innerHTML=[{icon:'💰',num:'₦'+paid.reduce((a,p)=>a+Number(p.amount||0),0).toLocaleString(),lbl:'Total Confirmed',css:'sc-green'},{icon:'✅',num:paid.length,lbl:'Paid',css:'sc-teal'},{icon:'⏳',num:pending.length,lbl:'Pending',css:'sc-gold'},{icon:'🔔',num:_allPayments.length,lbl:'All Records',css:'sc-blue'}].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
+  renderPaymentsList(_allPayments);
+}
+function renderPaymentsList(payments){
+  $('payments-list').innerHTML=payments.length?payments.sort((a,b)=>new Date(b.paymentDate||b.createdAt||0)-new Date(a.paymentDate||a.createdAt||0)).map(p=>`<div class="payment-card">
+    <div class="pn-icon pn-icon-${p.status==='paid'?'paid':p.status==='overdue'?'renewal':'pending'}">${p.status==='paid'?'✅':p.status==='overdue'?'🔴':'⏳'}</div>
+    <div style="flex:1;"><div class="pn-title">${p.studentName||'—'} — ${p.type==='sponsorship'?'Sponsorship':'School Fee'}</div>
+    <div class="pn-meta">Sponsor: ${p.sponsorName||'—'} · ${p.term} · ${p.session}<br>₦${Number(p.amount||0).toLocaleString()} · Ref: ${p.reference||'—'} · ${fmtDate(p.paymentDate)}${p.confirmedBy?' · Confirmed by: <strong>'+p.confirmedBy+'</strong>':''}</div></div>
+    <div style="text-align:right;"><span class="badge ${p.status==='paid'?'b-active':p.status==='overdue'?'b-red':'b-pending'}">${p.status}</span>
+    ${p.status==='pending'&&['admin','child_sponsorship','cofounder'].includes(S.activeRole||S.role)?`<div style="margin-top:5px;"><button class="btn btn-xs btn-green" onclick="confirmPayment('${p.id}')">✅ Confirm</button></div>`:''}</div>
+  </div>`).join(''):'<div class="empty"><div class="empty-icon">💳</div><p>No payment records yet.</p></div>';
+}
+function filterPayments(status,el){document.querySelectorAll('#view-payments .tab-btn').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');renderPaymentsList(status==='all'?_allPayments:_allPayments.filter(p=>p.status===status));}
+async function confirmPayment(id){await dbUpdate('Payments',id,{status:'paid',confirmedBy:S.name,confirmedAt:new Date().toISOString()});_inv('Payments');loadPayments();toast('✅ Payment confirmed');}
+async function recordPayment(){
+  const amount=$('pay-amount').value;const msg=$('record-payment-msg');
+  if(!amount){msg.innerHTML='<div class="alert al-err">Amount is required.</div>';return;}
+  const students=await dbRead('Students');const users=await dbRead('Users');
+  const st=students.find(s=>s.id===$('pay-student').value)||{};const sp=users.find(u=>u.id===$('pay-sponsor').value)||{};
+  const row={id:uid(),type:$('pay-type').value,amount:Number(amount),studentId:$('pay-student').value,studentName:st.name||'—',sponsorId:$('pay-sponsor').value,sponsorName:sp.name||'—',term:$('pay-term').value,session:$('pay-session').value,paymentDate:$('pay-date').value,reference:$('pay-ref').value.trim(),notes:$('pay-notes').value.trim(),status:'paid',confirmedBy:S.name,confirmedAt:new Date().toISOString(),createdAt:new Date().toISOString()};
+  await dbWrite('Payments',row);_inv('Payments');
+  if($('pay-send-email').value==='yes'&&sp.email){
+    await safePost({action:'sendEmail',toEmails:[sp.email],ccEmails:[],subject:`✅ Payment Confirmed — ${st.name||'Student'} · ${row.term}`,body:`Dear ${sp.name||'Sponsor'},\n\nYour payment of ₦${Number(amount).toLocaleString()} for ${st.name||'your student'} (${row.term}, ${row.session}) has been confirmed.\n\nReference: ${row.reference||'N/A'}\nDate: ${row.paymentDate}\nConfirmed by: ${S.name}\n\nThank you!\n\nKnosk EyeQ School Management`,senderId:S.id,senderName:S.name,senderEmail:S.email||''});
+    toast('✅ Payment recorded & confirmation email sent!');
+  }else{toast('✅ Payment recorded');}
+  msg.innerHTML='<div class="alert al-ok">✅ Payment recorded!</div>';setTimeout(()=>{closeModal('modal-record-payment');loadPayments();},1400);
+}
+async function sendPaymentNotification(){
+  const email=$('pn-email').value.trim();const msg=$('payment-notif-msg');if(!email){msg.innerHTML='<div class="alert al-err">Recipient email required.</div>';return;}
+  const type=$('pn-type').value;const student=$('pn-student').value;const amount=$('pn-amount').value;const date=$('pn-date').value;const custom=$('pn-message').value.trim();
+  const subjects={reminder:'Payment Reminder — Knosk EyeQ',receipt:'✅ Payment Receipt — Knosk EyeQ',overdue:'⚠️ Overdue Payment — Knosk EyeQ',renewal:'🔄 Sponsorship Renewal — Knosk EyeQ',allocation:'📋 Student Allocation Update — Knosk EyeQ'};
+  const body=`Dear Sponsor,\n\nThis is a ${type} notification for ${student||'your sponsored student'}.\nAmount: ₦${amount||'—'}\nDate: ${date?fmtDate(date):'—'}\n\n${custom||''}\n\nKnosk EyeQ School Management`;
+  const result=await safePost({action:'sendEmail',toEmails:[email],ccEmails:[],subject:subjects[type]||'Notification',body,senderId:S.id,senderName:S.name,senderEmail:S.email||''});
+  if(result?.success||result?.messageId){msg.innerHTML='<div class="alert al-ok">✅ Notification sent!</div>';toast('📧 Payment notification sent!');setTimeout(()=>{closeModal('modal-payment-notif');msg.innerHTML='';},1800);}
+  else{msg.innerHTML='<div class="alert al-err">❌ Failed: '+(result?.error||'Unknown error')+'</div>';}
+}
+
+// ──────────────────────────────────────
+//  PROGRAMS
+// ──────────────────────────────────────
+function renderProgCard(p){const icons={'Bible Study':'📖','Leadership Training':'🎤','Skill Acquisition':'🔧','Sports':'⚽','Arts & Culture':'🎨','Academic Support':'📚','Other':'🎯'};return`<div class="prog-card"><div class="pc-icon sc-blue">${icons[p.category]||'🎯'}</div><div class="pc-name">${p.name}</div><div class="pc-cat">${p.category}</div><div class="prog-bar-bg" style="margin-bottom:5px;"><div class="prog-bar pb-blue" style="width:${p.engagement||0}%;"></div></div><div style="display:flex;gap:5px;align-items:center;"><span class="badge ${p.status==='active'?'b-active':'b-pending'}">${p.status}</span><span style="font-size:11px;color:var(--muted);">${p.participants||0} students</span></div></div>`;}
+async function loadPrograms(){
+  const progs=await dbRead('Programs');
+  $('prog-stats').innerHTML=[{icon:'🎯',num:progs.filter(p=>p.status==='active').length,lbl:'Active',css:'sc-blue'},{icon:'👥',num:progs.reduce((a,p)=>a+Number(p.participants||0),0),lbl:'Participants',css:'sc-green'},{icon:'⏳',num:progs.filter(p=>p.status==='pending').length,lbl:'Pending',css:'sc-gold'}].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
+  $('prog-list').innerHTML=progs.map(renderProgCard).join('')||'<div class="empty"><div class="empty-icon">🎯</div><p>No programs yet</p></div>';
+}
+async function createProgram(){
+  const name=$('cp-name').value.trim();const msg=$('create-prog-msg');if(!name){msg.innerHTML='<div class="alert al-err">Name required.</div>';return;}
+  await dbWrite('Programs',{id:uid(),name,category:$('cp-cat').value,description:$('cp-desc').value.trim(),startDate:$('cp-start').value,target:$('cp-target').value,status:'pending',participants:0,engagement:0,createdBy:S.id,createdByName:S.name,createdAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">✅ Created! Pending approval.</div>';setTimeout(()=>{closeModal('modal-create-prog');loadPrograms();},1400);
+}
+
+// ──────────────────────────────────────
+//  MESSAGES
+// ──────────────────────────────────────
+async function loadMessages(){
+  const users=await dbRead('Users');const role=S.activeRole||S.role;
+  const allowed=role==='sponsor'?users.filter(u=>u.role==='cofounder'):users.filter(u=>u.role!=='sponsor'&&u.id!==S.id);
+  $('chat-contacts').innerHTML=allowed.map(u=>`<div class="chat-contact" onclick="openChat('${u.id}','${u.name}','${u.role}',this)"><div class="cc-av">${gi(u.name)}</div><div><div class="cc-name">${u.name}</div><div class="cc-role">${ROLES[u.role]?.label||u.role}</div></div></div>`).join('')||'<div class="empty" style="padding:18px;"><p>No contacts</p></div>';
+}
+function openChat(id,name,role,el){
+  _chatTarget={id,name,role};document.querySelectorAll('.chat-contact').forEach(c=>c.classList.remove('active'));el?.classList.add('active');
+  $('chat-header').innerHTML=`<div style="width:36px;height:36px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:white;">${gi(name)}</div><div><div style="font-size:14px;font-weight:700;">${name}</div><div style="font-size:10.5px;color:var(--muted);">${ROLES[role]?.label||role}</div></div>`;
+  fetchMessages();if(_chatPoll)clearInterval(_chatPoll);_chatPoll=setInterval(fetchMessages,5000);
+}
+async function fetchMessages(){
+  if(!_chatTarget)return;const msgs=await dbRead('Messages');const thread=msgs.filter(m=>(m.senderId===S.id&&m.recipientId===_chatTarget.id)||(m.senderId===_chatTarget.id&&m.recipientId===S.id));
+  const pane=$('chat-msgs');
+  if(!thread.length){pane.innerHTML='<div class="empty" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;"><div style="font-size:40px;opacity:.2;">💬</div><p style="margin-top:8px;">No messages yet. Say hello!</p></div>';return;}
+  pane.innerHTML=thread.map(m=>{const mine=m.senderId===S.id;return`<div class="chat-msg ${mine?'mine':'theirs'}">${m.text}<div class="msg-time">${fmtTime(m.sentAt)}</div></div>`;}).join('');
+  pane.scrollTop=pane.scrollHeight;
+}
+async function sendMsg(){
+  const txt=$('chat-input').value.trim();if(!txt||!_chatTarget)return;
+  await dbWrite('Messages',{id:uid(),senderId:S.id,senderName:S.name,senderRole:S.role,recipientId:_chatTarget.id,recipientName:_chatTarget.name,text:txt,sentAt:new Date().toISOString(),read:false});
+  $('chat-input').value='';fetchMessages();
+}
+
+// ──────────────────────────────────────
+//  EMAIL (ALL ROLES — FIXED GMAIL SMTP)
+// ──────────────────────────────────────
+async function loadEmailView(){
+  const users=await dbRead('Users');const sel=$('email-to-user');
+  if(sel&&sel.children.length<=1)sel.innerHTML='<option value="">— Or select a Knosk user —</option>'+users.filter(u=>u.id!==S.id).map(u=>`<option value="${u.email}">${u.name} (${ROLES[u.role]?.label||u.role}) — ${u.email}</option>`).join('');
+  loadEmailInbox('inbox');
+  // Populate payment modal dropdowns
+  const students=await dbRead('Students');const sponsors=users.filter(u=>u.role==='sponsor');
+  const ps=$('pay-student');if(ps)ps.innerHTML='<option value="">Select...</option>'+students.map(s=>`<option value="${s.id}">${s.name} (${s.class||'—'})</option>`).join('');
+  const ss=$('pay-sponsor');if(ss)ss.innerHTML='<option value="">Select...</option>'+sponsors.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  const tr=$('tr-student');if(tr)tr.innerHTML='<option value="">Select...</option>'+students.map(s=>`<option value="${s.id}">${s.name} (${s.class||'—'}${s.arm||''})</option>`).join('');
+  const sp=$('sp-student');if(sp)sp.innerHTML='<option value="">Select...</option>'+students.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  const ssp=$('sp-sponsor');if(ssp)ssp.innerHTML='<option value="">Select...</option>'+sponsors.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+}
+async function loadEmailInbox(tab='inbox'){
+  const emails=await dbRead('Emails');const el=$('email-inbox-list');const heading=$('email-tab-heading');if(!el)return;
+  let filtered=tab==='inbox'?emails.filter(e=>{const to=Array.isArray(e.toEmails)?e.toEmails:(typeof e.toEmails==='string'&&e.toEmails.startsWith('[')?JSON.parse(e.toEmails):[e.toEmails]);const cc=Array.isArray(e.ccEmails)?e.ccEmails:(typeof e.ccEmails==='string'&&e.ccEmails.startsWith('[')?JSON.parse(e.ccEmails):[]);return to.includes(S.email)||cc.includes(S.email);}):emails.filter(e=>e.senderId===S.id||e.senderEmail===S.email);
+  if(heading)heading.textContent=tab==='inbox'?'📥 Inbox':'📤 Sent';
+  filtered.sort((a,b)=>new Date(b.sentAt)-new Date(a.sentAt));
+  if(!filtered.length){el.innerHTML=`<div class="empty"><div class="empty-icon">📧</div><p>${tab==='inbox'?'Your inbox is empty.':'No sent emails yet.'}<br><button class="btn btn-blue btn-sm" style="margin-top:10px;" onclick="openModal('modal-compose-email')">✏️ Compose Email</button></p></div>`;return;}
+  el.innerHTML=filtered.map(e=>{const isSent=tab==='sent';const to=Array.isArray(e.toEmails)?e.toEmails:(typeof e.toEmails==='string'&&e.toEmails.startsWith('[')?JSON.parse(e.toEmails):[e.toEmails]);const sub=isSent?`To: ${to.join(', ')} · ${fmtDate(e.sentAt)}`:`From: ${e.senderName||'—'} · ${fmtDate(e.sentAt)}`;
+    return`<div style="display:flex;align-items:flex-start;gap:11px;padding:13px 15px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .15s;background:${!e.read&&!isSent?'var(--blue-pale)':'white'};" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='${!e.read&&!isSent?'var(--blue-pale)':'white'}'">
+      <div style="width:38px;height:38px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:white;flex-shrink:0;">${gi(isSent?S.name:(e.senderName||'?'))}</div>
+      <div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:${!e.read&&!isSent?'800':'500'};color:var(--text);">${e.subject||'(no subject)'}</div><div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${sub}</div><div style="font-size:12px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(e.body||'').slice(0,110)}…</div></div>
+      ${!e.read&&!isSent?'<div style="width:7px;height:7px;border-radius:50%;background:var(--blue);flex-shrink:0;margin-top:5px;"></div>':''}
+    </div>`;}).join('');
+}
+function switchEmailTab(tab,el){document.querySelectorAll('#view-email .tab-btn').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');loadEmailInbox(tab);}
+function addEmailRecipient(){const inp=$('email-to-manual');const email=inp?.value.trim().toLowerCase();if(!email||!email.includes('@')){toast('Enter a valid email','warn');return;}if(_emailRecipients.includes(email)){toast('Already added');return;}_emailRecipients.push(email);inp.value='';renderEmailTags();}
+function addUserAsRecipient(){const sel=$('email-to-user');const email=sel?.value;if(!email)return;if(!_emailRecipients.includes(email)){_emailRecipients.push(email);renderEmailTags();}sel.value='';}
+function removeEmailRecipient(email){_emailRecipients=_emailRecipients.filter(e=>e!==email);renderEmailTags();}
+function renderEmailTags(){const w=$('email-recipients');if(!w)return;w.innerHTML=_emailRecipients.map(e=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--blue-pale);color:var(--blue);padding:2px 9px;border-radius:18px;font-size:12px;font-weight:600;">${e}<button onclick="removeEmailRecipient('${e}')" style="background:none;border:none;cursor:pointer;color:var(--blue);font-size:13px;line-height:1;">×</button></span>`).join('');}
+async function sendAppEmail(){
+  const subject=$('email-subject')?.value.trim();const body=$('email-body')?.value.trim();const msg=$('compose-email-msg');const btn=$('send-email-btn');
+  if(!_emailRecipients.length){msg.innerHTML='<div class="alert al-err">Add at least one recipient.</div>';return;}
+  if(!subject||!body){msg.innerHTML='<div class="alert al-err">Subject and message body are required.</div>';return;}
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Sending via Gmail...';
+  msg.innerHTML='<div class="alert al-info">⏳ Sending through Gmail SMTP...</div>';
+  const users=await dbRead('Users');const role=S.activeRole||S.role;
+  let ccEmails=[];
+  if(!['cofounder','admin'].includes(role))ccEmails=users.filter(u=>['cofounder','knosk_admin'].includes(u.role)&&!_emailRecipients.includes(u.email)&&u.email!==S.email).map(u=>u.email);
+  const result=await safePost({action:'sendEmail',toEmails:_emailRecipients,ccEmails,subject,body,senderName:S.name,senderRole:ROLES[S.role]?.label||S.role,senderId:S.id,senderEmail:S.email||'',replyTo:S.email||''});
+  btn.disabled=false;btn.innerHTML='📤 Send Email';
+  if(result?.error&&!result?.success&&!result?.messageId&&!DEMO_MODE){msg.innerHTML=`<div class="alert al-err">❌ ${result.error}</div>`;return;}
+  const record={id:uid(),senderId:S.id,senderName:S.name,senderEmail:S.email||'',toEmails:JSON.stringify(_emailRecipients),ccEmails:JSON.stringify(ccEmails),subject,body,sentAt:new Date().toISOString(),status:'sent',read:false};
+  await dbWrite('Emails',record);_inv('Emails');
+  for(const u of users.filter(u=>_emailRecipients.includes(u.email)||ccEmails.includes(u.email))){await dbWrite('Notifications',{id:uid(),userId:u.id,title:'📧 New Email: '+subject,body:'From: '+S.name,icon:'📧',read:false,createdAt:new Date().toISOString()});}
+  msg.innerHTML=`<div class="alert al-ok">✅ Email sent${DEMO_MODE?' (Demo mode — not actually delivered to Gmail)':''}!</div>`;
+  _emailRecipients=[];renderEmailTags();toast('📧 Email sent!');loadEmailInbox('sent');
+  setTimeout(()=>{closeModal('modal-compose-email');msg.innerHTML='';$('email-subject').value='';$('email-body').value='';},2200);
+}
+
+// ──────────────────────────────────────
+//  ADMIN USERS
+// ──────────────────────────────────────
+async function loadAdminUsers(){
+  const users=await dbRead('Users');
+  $('users-tbody').innerHTML=users.map((u,i)=>`<tr>
+    <td>${i+1}</td>
+    <td><div style="display:flex;align-items:center;gap:7px;"><div style="width:28px;height:28px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:white;">${gi(u.name)}</div><strong>${u.name}</strong></div></td>
+    <td style="font-size:11.5px;color:var(--muted);">${u.email}</td>
+    <td><span class="badge b-blue">${ROLES[u.role]?.label||u.role}</span></td>
+    <td><span class="badge ${u.status==='active'?'b-active':u.status==='suspended'?'b-suspended':'b-pending'}">${u.status==='suspended'?'🚫 SUSP':u.status||'pending'}</span></td>
+    <td style="font-size:11.5px;color:var(--muted);">${fmtDate(u.joinedAt)}</td>
+    <td><div style="display:flex;gap:3px;">${u.status==='pending'?`<button class="btn btn-xs btn-green" onclick="approveUser('${u.id}')">✓</button>`:''}${u.role!=='admin'?`<button class="btn btn-xs btn-red" onclick="delUser('${u.id}','${u.name}')">Del</button>`:''}</div></td>
+  </tr>`).join('');
+}
+async function approveUser(id){await dbUpdate('Users',id,{status:'active'});_inv('Users');loadAdminUsers();toast('✅ User approved');}
+async function delUser(id,name){if(!confirm(`Delete "${name}"?`))return;await safePost({action:'deleteUser',userId:id});_inv('Users');loadAdminUsers();}
+async function adminAddUser(){
+  const name=$('au-name').value.trim();const email=$('au-email').value.trim().toLowerCase();const pass=$('au-pass').value;const role=$('au-role').value;const phone=$('au-phone').value.trim();const msg=$('add-user-msg');
+  if(!name||!email||!pass){msg.innerHTML='<div class="alert al-err">Name, email and password required.</div>';return;}
+  await dbWrite('Users',{id:uid(),name,email,password:pass,role,status:'active',phone,points:0,joinedAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">✅ User created!</div>';setTimeout(()=>{closeModal('modal-add-user');loadAdminUsers();},1200);
+}
+
+// ──────────────────────────────────────
+//  ADD STUDENT
+// ──────────────────────────────────────
+async function addStudent(){
+  const name=$('as-name').value.trim();const msg=$('add-student-msg');if(!name){msg.innerHTML='<div class="alert al-err">Name required.</div>';return;}
+  await dbWrite('Students',{id:uid(),name,gender:$('as-gender').value,class:$('as-class').value,arm:$('as-arm').value,dateOfAdmission:$('as-doa').value,parentName:$('as-parent').value.trim(),parentPhone:$('as-pphone').value.trim(),imageUrl:$('as-img').value.trim(),status:'active',points:0,attendancePct:0,createdAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">✅ Student added!</div>';setTimeout(()=>{closeModal('modal-add-student');_inv('Students');loadStudentsView();},1200);
+}
+
+// ──────────────────────────────────────
+//  BULK ADD STUDENTS
+// ──────────────────────────────────────
+async function bulkAddStudents(){
+  const csv=$('bulk-students-csv').value.trim();const msg=$('bulk-students-msg');if(!csv){msg.innerHTML='<div class="alert al-err">Paste CSV data first.</div>';return;}
+  const lines=csv.split('\n').filter(l=>l.trim());let count=0;const creds=[];
+  for(const line of lines){const p=line.split(',').map(x=>x.trim());if(p.length<3)continue;const name=p[0].toUpperCase();const cls=p[1]||'Jss1';const arm=p[2]||'A';const gender=p[3]||'M';const doa=p[4]||today();const parent=p[5]||'';const pphone=p[6]||'';
+    const email=name.toLowerCase().replace(/\s+/g,'.')+'.'+Math.floor(Math.random()*900+100)+'@knoskstudents.edu';const pass='Knosk'+Math.floor(Math.random()*90000+10000);const id=uid();
+    await dbWrite('Students',{id,name,class:cls,arm,gender,dateOfAdmission:doa,parentName:parent,parentPhone:pphone,status:'active',points:0,attendancePct:0,createdAt:new Date().toISOString()});
+    await dbWrite('Users',{id:uid(),name,email,password:pass,role:'student',status:'active',class:cls,arm,gender,points:0,joinedAt:new Date().toISOString()});
+    creds.push({name,email,pass,cls,arm});count++;
+  }
+  msg.innerHTML=`<div class="alert al-ok">✅ ${count} students added!</div>`;
+  const card=$('credentials-card');if(card)card.style.display='block';
+  const list=$('credentials-list');if(list)list.innerHTML=`<table class="data-table"><thead><tr><th>Name</th><th>Class</th><th>Email</th><th>Password</th></tr></thead><tbody>${creds.map(c=>`<tr><td><strong>${c.name}</strong></td><td>${c.cls}${c.arm}</td><td style="font-family:monospace;font-size:11.5px;">${c.email}</td><td style="font-family:monospace;font-weight:700;color:var(--blue);">${c.pass}</td></tr>`).join('')}</tbody></table><button class="btn btn-sm btn-ghost" style="margin-top:9px;" onclick="window.print()">🖨️ Print</button>`;
+}
+
+// ──────────────────────────────────────
+//  SETTINGS
+// ──────────────────────────────────────
+async function saveSettings(){
+  await dbWrite('Settings',{id:'settings_main',session:$('set-session').value,term:$('set-term').value,openDate:$('set-open').value,closeDate:$('set-close').value,totalDays:$('set-days').value,promotionBenchmark:$('set-benchmark').value||50,updatedAt:new Date().toISOString()});
+  toast('✅ Settings saved');
+}
+async function postAnnouncement(){
+  const title=$('ann-title').value.trim();const body=$('ann-body').value.trim();if(!title||!body){toast('Title and message required','warn');return;}
+  await dbWrite('Announcements',{id:uid(),title,body,target:$('ann-target').value,postedBy:S.id,postedByName:S.name,status:'approved',createdAt:new Date().toISOString()});
+  toast('📢 Announcement posted!');$('ann-title').value='';$('ann-body').value='';
+}
+
+// ──────────────────────────────────────
+//  SPONSORSHIP ASSIGN / NEW SPONSOR / BULK IMPORT
+// ──────────────────────────────────────
+function updateSponAmount(){const t=$('sp-type').value;if(t==='term')$('sp-amount').value='80000';else if(t==='year')$('sp-amount').value='240000';}
+async function assignSponsor(){
+  const studentId=$('sp-student').value;const sponsorId=$('sp-sponsor').value;const msg=$('assign-spon-msg');
+  if(!studentId||!sponsorId){msg.innerHTML='<div class="alert al-err">Select both student and sponsor.</div>';return;}
+  const [students,users]=await Promise.all([dbRead('Students'),dbRead('Users')]);const st=students.find(s=>s.id===studentId)||{};const sp=users.find(u=>u.id===sponsorId)||{};
+  await dbWrite('Sponsorships',{id:uid(),studentId,studentName:st.name||'—',sponsorId,sponsorName:sp.name||'—',startDate:$('sp-start').value,endDate:$('sp-end').value,amount:$('sp-amount').value,notes:$('sp-notes').value,status:$('sp-status').value||'active',sponsorshipType:$('sp-type').value,inviteMethod:$('sp-invite').value,term:'1st Term',session:'2025/2026',createdAt:new Date().toISOString()});
+  msg.innerHTML='<div class="alert al-ok">✅ Sponsor assigned!</div>';_inv('Sponsorships');setTimeout(()=>{closeModal('modal-assign-sponsor');loadSponsorship();},1300);
+}
+function updateNewSponAmount(){const t=$('ns-spon-type')?.value;const c=parseInt($('ns-student-count')?.value)||1;const base=t==='term'?80000:t==='year'?240000:0;if($('ns-total-amount')&&base)$('ns-total-amount').value=base*c;const sel=$('ns-student-selector');if(sel){sel.style.display=c>0?'block':'none';loadNSStudentBoxes(c);}}
+async function loadNSStudentBoxes(max){const students=await dbRead('Students');const el=$('ns-student-checkboxes');if(!el)return;el.innerHTML=students.map(s=>`<label style="display:flex;align-items:center;gap:9px;padding:7px;border:1px solid var(--border2);border-radius:var(--r-sm);cursor:pointer;"><input type="checkbox" class="ns-cb" value="${s.id}" data-name="${s.name}" style="accent-color:var(--blue);" onchange="checkNSLimit(${max})"><div style="width:26px;height:26px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:white;">${gi(s.name||'S')}</div><div style="flex:1;"><div style="font-size:12px;font-weight:700;">${s.name}</div><div style="font-size:10px;color:var(--muted);">${s.class||'—'}${s.arm||''}</div></div></label>`).join('');}
+function checkNSLimit(max){if(document.querySelectorAll('.ns-cb:checked').length>max){event.target.checked=false;toast(`Max ${max} student(s) for this sponsor`,'warn');}}
+async function createSponsorAccount(){
+  const name=$('ns-name')?.value.trim();const email=$('ns-email')?.value.trim().toLowerCase();const msg=$('new-sponsor-msg');
+  if(!name||!email){msg.innerHTML='<div class="alert al-err">Name and email required.</div>';return;}
+  const sel=[...document.querySelectorAll('.ns-cb:checked')].map(cb=>({id:cb.value,name:cb.dataset.name||''}));
+  const sId=uid();const pass='Knosk'+Math.floor(Math.random()*90000+10000);const t=$('ns-spon-type')?.value;const total=$('ns-total-amount')?.value;const cnt=sel.length||1;
+  await dbWrite('Users',{id:sId,name,email,password:pass,phone:$('ns-phone')?.value.trim(),role:'sponsor',sponsorType:$('ns-type')?.value,inviteMethod:$('ns-invite-method')?.value,status:'active',points:0,joinedAt:new Date().toISOString()});
+  for(const st of sel){await dbWrite('Sponsorships',{id:uid(),studentId:st.id,studentName:st.name,sponsorId:sId,sponsorName:name,amount:Math.round(Number(total||0)/cnt),sponsorshipType:t,startDate:$('ns-start-date')?.value,endDate:$('ns-end-date')?.value,status:$('ns-init-status')?.value||'active',inviteMethod:$('ns-invite-method')?.value,notes:$('ns-notes')?.value.trim(),session:'2025/2026',term:'1st Term',createdAt:new Date().toISOString()});}
+  msg.innerHTML=`<div class="alert al-ok">✅ Sponsor created! ${sel.length} student(s) assigned. Temp password: <strong>${pass}</strong></div>`;
+  _inv('Users');_inv('Sponsorships');toast('🤝 Sponsor account created');setTimeout(()=>{closeModal('modal-new-sponsor');loadSponsorship();},2000);
+}
+async function bulkImport(){
+  const csv=$('bulk-csv').value.trim();const msg=$('bulk-import-msg');if(!csv){msg.innerHTML='<div class="alert al-err">Paste CSV data first.</div>';return;}
+  msg.innerHTML='<div class="alert al-info">⏳ Processing...</div>';
+  const lines=csv.split('\n').filter(l=>l.trim()&&!l.toLowerCase().startsWith('studentid'));let count=0,ns=0,np=0;
+  const [es,eu]=await Promise.all([dbRead('Students'),dbRead('Users')]);const en=es.map(s=>s.name?.toUpperCase()||'');const ee=eu.map(u=>u.email?.toLowerCase()||'');
+  for(const line of lines){
+    const p=line.split(',').map(x=>x.trim());if(p.length<5)continue;
+    const sName=(p[1]||'').toUpperCase();const spEmail=(p[5]||'').toLowerCase();let sId=p[0]||uid();
+    if(!en.includes(sName)){await dbWrite('Students',{id:sId,name:sName,gender:p[2]||'',class:p[3]||'',arm:'A',status:'pending',points:0,attendancePct:0,autoCreated:true,createdAt:new Date().toISOString()});ns++;}
+    else{const f=es.find(s=>s.name?.toUpperCase()===sName||s.id===p[0]);if(f)sId=f.id;}
+    let spId=uid();
+    if(spEmail&&!ee.includes(spEmail)){await dbWrite('Users',{id:spId,name:(p[4]||'').toUpperCase(),email:spEmail,password:'Knosk'+Math.floor(Math.random()*9000+1000),phone:p[6]||'',role:'sponsor',status:'pending',points:0,autoCreated:true,joinedAt:new Date().toISOString()});np++;}
+    else{const f=eu.find(u=>u.email?.toLowerCase()===spEmail);if(f)spId=f.id;}
+    await dbWrite('Sponsorships',{id:uid(),studentId:sId,studentName:sName,sponsorId:spId,sponsorName:(p[4]||'').toUpperCase(),sponsorEmail:spEmail,sponsorPhone:p[6]||'',startDate:p[7]||today(),amount:parseFloat(p[8])||80000,status:p[9]==='pending'?'pending':'active',sponsorshipType:parseFloat(p[8]||0)>=200000?'year':'term',term:p[10]||'1st Term',session:p[11]||'2025/2026',attendanceDays:parseInt(p[12])||0,performanceAvg:parseFloat(p[13])||0,notes:p[14]||'',importedAt:new Date().toISOString()});count++;
+  }
+  msg.innerHTML=`<div class="alert al-ok">✅ ${count} records imported.${ns?' '+ns+' new students (pending approval).':''}${np?' '+np+' new sponsors created.':''}</div>`;
+}
+
+// ──────────────────────────────────────
+//  NOTIFICATIONS
+// ──────────────────────────────────────
+let _notifs=[];
+async function loadNotifications(){
+  _notifs=await dbRead('Notifications');const unread=_notifs.filter(n=>!n.read&&n.userId===S.id).length;
+  const b=$('notif-badge');if(b){b.textContent=unread;b.classList.toggle('show',unread>0);}
+  $('notif-count-lbl').textContent=`${unread} unread`;renderNotifs();
+}
+function renderNotifs(){
+  const mine=_notifs.filter(n=>n.userId===S.id);
+  $('notif-list').innerHTML=mine.map(n=>`<div class="notif-item ${!n.read?'unread':''}" onclick="markRead('${n.id}')"><div class="ni-icon">${n.icon||'🔔'}</div><div class="ni-body"><div class="ni-title">${n.title||'Notification'}</div><div class="ni-meta">${n.body||''} · ${fmtDate(n.createdAt)}</div></div>${!n.read?'<div class="ni-dot"></div>':''}</div>`).join('')||'<div class="empty" style="padding:36px;text-align:center;"><div style="font-size:34px;opacity:.25;">🔔</div><p style="margin-top:7px;color:var(--muted);">No notifications yet</p></div>';
+}
+function markRead(id){const n=_notifs.find(x=>x.id===id);if(n)n.read=true;renderNotifs();}
+function markAllRead(){_notifs.forEach(n=>n.read=true);renderNotifs();loadNotifications();}
+function toggleNotifDrawer(){$('notif-drawer').classList.toggle('open');}
+function toggleSidebar(){$('sidebar').classList.toggle('mob-open');}
+
+// ──────────────────────────────────────
+//  HOW TO USE
+// ──────────────────────────────────────
+function loadHowTo(){
+  const role=S.activeRole||S.role;
+  const g={
+    admin:{t:'👑 Admin — Full Control Guide',items:[['👑','User Management','Create all 8 user types. Approve/delete accounts. Generate credentials.'],['🏫','Class Management','Assign classes, transfer between arms (JSS1A→JSS1B), suspend & reactivate students.'],['⬆️','Student Promotion','Run end-of-session auto-promotion. Set benchmark. Override individual decisions.'],['💳','Payment Notifications','Record payments, confirm transactions, send Gmail receipts to sponsors.']]},
+    cofounder:{t:'🌟 Co-founder — Strategic Guide',items:[['📊','Analytics','Full live dashboards, class performance, teacher activity, sponsorship coverage.'],['⬆️','Promotion Authority','Final approval on student promotions at end of session.'],['💳','Payment Oversight','Full payment history, overdue alerts, send notifications to sponsors.'],['📧','Email — All Roles','All 8 roles now have full email access via Gmail SMTP.']]},
+    knosk_admin:{t:'🛡️ Knosk Admin — Control Tower',items:[['✅','Approvals Queue','Every teacher upload and program goes through you before going live.'],['🚨','Escalation Management','Resolve or escalate teacher concerns to co-founders.'],['📊','Analytics Overview','CA scores, class performance, attendance trends, at-risk students.'],['📧','Email Access','Full email access for all school communication.']]},
+    child_sponsorship:{t:'❤️ Child Sponsorship Guide',items:[['💳','Payment Notifications','Record payments, confirm transactions, send receipts & reminders via Gmail.'],['📋','Sponsor Transparency','Sponsors can now see full CA scores, payment history, and term reports.'],['📥','Bulk Import','Import historical records via CSV — auto-creates pending accounts.'],['📧','Email — All Roles','You and all other roles now have full Gmail email access.']]},
+    teacher:{t:'👩‍🏫 Teacher — Complete Guide',items:[['📝','CA Score Management (Form Teacher)','As Form Teacher, enter CA1–CA4 (each /25) for every subject for every student in your form class. You are responsible for all 4 CAs.'],['👨‍🎓','My Students','View students in your form class and subject classes. Approve new registrations.'],['📅','Attendance','Mark morning & afternoon. Close register at end of term.'],['📧','Email Access','All roles including teachers now have full email access via Gmail.']]},
+    student:{t:'🎓 Student — Learning Guide',items:[['📊','My CA Scores','View your CA1–CA4 scores per subject per term, entered by your Form Teacher. ≥50% average = promoted.'],['✏️','Daily Exercise','2 questions per day, 10pts each. Builds your leaderboard rank.'],['⬆️','Promotion','At end of session, your CA average determines promotion. ≥50% = next class.'],['📧','Email Access','Students can now send emails to teachers and school management.']]},
+    sponsor:{t:'🤝 Sponsor — Transparency Guide',items:[['📊','Academic Progress Tab','See your student\'s CA1–CA4 scores for every subject and term with grades.'],['💳','Payment History','Full transaction record with confirmation dates, references and amounts.'],['📋','Term Reports','Compiled impact report: attendance, CA averages, class rank, sponsorship status.'],['📧','Email','Send emails to co-founders and school management directly from your dashboard.']]},
+    knosk_programs:{t:'🎯 Programs Guide',items:[['🎯','Create Programs','Submit for Knosk Admin approval. Manage enrollment.'],['📧','Email Access','All roles including Programs staff now have Gmail email access.'],['📢','Announcements','Post program announcements through the approval pipeline.'],['👥','Enrollment','Bulk enroll students, staff, or sponsors into any active program.']]},
+  };
+  const info=g[role]||g.student;
+  $('howto-content').innerHTML=`<div style="background:var(--blue-pale);border-radius:var(--r-lg);padding:20px 22px;margin-bottom:18px;border:1px solid rgba(27,79,168,.12);"><div style="font-family:'DM Serif Display',serif;font-size:20px;color:var(--navy);margin-bottom:5px;">${info.t}</div></div>
+  <div class="two-col">${info.items.map(([icon,t,d])=>`<div style="padding:14px;background:white;border-radius:var(--r-sm);border:1px solid var(--border2);box-shadow:var(--sh-card);"><div style="font-size:20px;margin-bottom:5px;">${icon}</div><div style="font-weight:800;color:var(--navy);margin-bottom:4px;font-size:13px;">${t}</div><div style="font-size:12px;color:var(--muted);line-height:1.65;">${d}</div></div>`).join('')}</div>
+  <div class="alert al-info" style="margin-top:14px;"><span>💡</span><span>Knosk EyeQ v3.0 · All roles have email access · CA Scores managed by Form Teachers · Full sponsor transparency · Student suspension/transfer/promotion system.</span></div>`;
+}
+
+// ──────────────────────────────────────
+//  LOGOUT + SESSION RESTORE
+// ──────────────────────────────────────
+function doLogout(){
+  if(confirm('Sign out of Knosk EyeQ?')){
+    if(_sessionToken&&!DEMO_MODE)fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logout',token:_sessionToken,userId:_sessionUserId})}).catch(()=>{});
+    sessionStorage.clear();_sessionToken=null;_sessionUserId=null;S={};
+    if(_chatPoll)clearInterval(_chatPoll);if(_slidePoll)clearInterval(_slidePoll);
+    showPage('page-login');
+  }
+}
+window.addEventListener('load',()=>{
+  const saved=sessionStorage.getItem('knosk_s');const savedToken=sessionStorage.getItem('knosk_t');const savedUserId=sessionStorage.getItem('knosk_u');
+  if(savedToken){_sessionToken=savedToken;_sessionUserId=savedUserId;}
+  if(saved){try{const u=JSON.parse(saved);if(u?.id){S=u;if(S.activeRole)selectRole(S.activeRole);else showWelcomePage();}}catch(e){}}
+  document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+  // Populate dropdowns when modals open
+  $('modal-assign-sponsor')?.addEventListener('click',async()=>{
+    if($('sp-student').children.length>1)return;const [students,users]=await Promise.all([dbRead('Students'),dbRead('Users')]);
+    $('sp-student').innerHTML='<option value="">Select...</option>'+students.map(s=>`<option value="${s.id}">${s.name} (${s.class||'—'}${s.arm||''})</option>`).join('');
+    $('sp-sponsor').innerHTML='<option value="">Select...</option>'+users.filter(u=>u.role==='sponsor').map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  });
+});
