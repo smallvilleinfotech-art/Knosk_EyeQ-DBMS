@@ -827,6 +827,9 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 }
 .tab-btn.active{background:white;color:var(--blue);box-shadow:var(--sh-sm);font-weight:700;}
 .tab-btn:hover:not(.active){background:rgba(27,79,168,.07);color:var(--blue);}
+/* CA Score Grades */
+.ca-grade-A{color:#16a34a;}.ca-grade-B{color:#2563eb;}.ca-grade-C{color:#d97706;}.ca-grade-D{color:#9333ea;}.ca-grade-F{color:#dc2626;}
+.btn-xs{padding:3px 8px;font-size:11.5px;border-radius:5px;}
 
 /* ═══════════════════════════════════════
    ALERTS
@@ -2543,14 +2546,14 @@ const DEMO_USERS = [
   {id:'u_sp2',    name:'DR SARAH FOUNDATION', email:'sarah@foundation.org',   password:'Knosk@2025',     role:'sponsor',          status:'active',phone:'08000000008',points:0,joinedAt:'2025-01-10'},
 ];
 const DEMO_STUDENTS = [
-  {id:'st_001',name:'ADEBAYO JAMES',      class:'Jss1',gender:'M',status:'active',points:85,attendancePct:92,parentName:'Mr. Adebayo Sr.',parentPhone:'08011111111',joinedAt:'2025-01-15'},
-  {id:'st_002',name:'CHIDINMA OKAFOR',    class:'Jss1',gender:'F',status:'active',points:92,attendancePct:96,parentName:'Mrs. Okafor',     parentPhone:'08022222222',joinedAt:'2025-01-15'},
-  {id:'st_003',name:'IBRAHIM MUSA',       class:'Jss2',gender:'M',status:'active',points:78,attendancePct:88,parentName:'Alhaji Musa',     parentPhone:'08033333333',joinedAt:'2025-01-16'},
-  {id:'st_004',name:'GRACE ADELEKE',      class:'Ss1', gender:'F',status:'active',points:95,attendancePct:98,parentName:'Mr. Adeleke',     parentPhone:'08044444444',joinedAt:'2025-01-16'},
-  {id:'st_005',name:'TAIWO OLUWOLE',      class:'Ss2', gender:'M',status:'active',points:65,attendancePct:75,parentName:'Mrs. Oluwole',    parentPhone:'08055555555',joinedAt:'2025-01-17'},
-  {id:'st_006',name:'AMAKA EZE',          class:'Jss3',gender:'F',status:'active',points:88,attendancePct:94,parentName:'Dr. Eze',         parentPhone:'08066666666',joinedAt:'2025-01-17'},
-  {id:'st_007',name:'EMEKA OBI',          class:'Ss3', gender:'M',status:'active',points:72,attendancePct:82,parentName:'Chief Obi',       parentPhone:'08077777777',joinedAt:'2025-01-18'},
-  {id:'st_008',name:'BLESSING NWOSU',     class:'Jss1',gender:'F',status:'pending',points:0, attendancePct:0, parentName:'Mr. Nwosu',       parentPhone:'08088888888',joinedAt:'2025-04-01'},
+  {id:'st_001',name:'ADEBAYO JAMES',      class:'Jss1',arm:'A',gender:'M',status:'active',points:85,attendancePct:92,parentName:'Mr. Adebayo Sr.',parentPhone:'08011111111',joinedAt:'2025-01-15'},
+  {id:'st_002',name:'CHIDINMA OKAFOR',    class:'Jss1',arm:'B',gender:'F',status:'active',points:92,attendancePct:96,parentName:'Mrs. Okafor',     parentPhone:'08022222222',joinedAt:'2025-01-15'},
+  {id:'st_003',name:'IBRAHIM MUSA',       class:'Jss2',arm:'A',gender:'M',status:'active',points:78,attendancePct:88,parentName:'Alhaji Musa',     parentPhone:'08033333333',joinedAt:'2025-01-16'},
+  {id:'st_004',name:'GRACE ADELEKE',      class:'Ss1', arm:'C',gender:'F',status:'active',points:95,attendancePct:98,parentName:'Mr. Adeleke',     parentPhone:'08044444444',joinedAt:'2025-01-16'},
+  {id:'st_005',name:'TAIWO OLUWOLE',      class:'Ss2', arm:'A',gender:'M',status:'active',points:65,attendancePct:75,parentName:'Mrs. Oluwole',    parentPhone:'08055555555',joinedAt:'2025-01-17'},
+  {id:'st_006',name:'AMAKA EZE',          class:'Jss3',arm:'B',gender:'F',status:'active',points:88,attendancePct:94,parentName:'Dr. Eze',         parentPhone:'08066666666',joinedAt:'2025-01-17'},
+  {id:'st_007',name:'EMEKA OBI',          class:'Ss3', arm:'A',gender:'M',status:'active',points:72,attendancePct:82,parentName:'Chief Obi',       parentPhone:'08077777777',joinedAt:'2025-01-18'},
+  {id:'st_008',name:'BLESSING NWOSU',     class:'Jss1',arm:'C',gender:'F',status:'pending',points:0, attendancePct:0, parentName:'Mr. Nwosu',       parentPhone:'08088888888',joinedAt:'2025-04-01'},
 ];
 const DEMO_SPONSORSHIPS = [
   {id:'spo_001',studentId:'st_001',studentName:'ADEBAYO JAMES',      sponsorId:'u_sp1',sponsorName:'MR BLESSING DONOR',   status:'active',amount:3100,startDate:'2025-01-20',term:'1st Term',session:'2025/2026',notes:'First-time sponsor'},
@@ -2601,6 +2604,9 @@ async function demoApi(p) {
     if(p.sheet==='Messages') return [];
     if(p.sheet==='Content') return [];
     if(p.sheet==='Attendance') return [];
+    if(p.sheet==='CaScores') return [];
+    if(p.sheet==='Payments') return [];
+    if(p.sheet==='Emails') return [];
     if(p.sheet==='ExerciseScores') {
       return DEMO_STUDENTS.map((s,i)=>({userId:s.id,name:s.name,class:s.class,total:s.points,rank:i+1}));
     }
@@ -2943,6 +2949,7 @@ async function doRegister(){
     id:uid(),name,email,password:pass,phone,role,gender,
     status:'pending',points:0,subjects,
     class:role==='student'?$('rg-class').value:'',
+    arm:role==='student'?($('rg-arm')?.value||'A'):'',
     imageUrl:role==='student'?($('rg-img').value.trim()):'',
     parentName:role==='student'?($('rg-parent').value.trim()):'',
     parentPhone:role==='student'?($('rg-pphone').value.trim()):'',
