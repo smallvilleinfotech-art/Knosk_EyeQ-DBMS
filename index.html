@@ -1300,6 +1300,9 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
       <span class="fi">🔒</span>
       <input type="password" id="li-pass" placeholder="Enter your password" autocomplete="current-password">
     </div>
+    <div class="auth-link" style="text-align:right;margin:-10px 0 16px;">
+      <a onclick="openForgotPassword()">Forgot password?</a>
+    </div>
     <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign In to Knosk EyeQ</button>
     <div class="auth-link">Don't have an account? <a onclick="goToRegister()">Register Here</a></div>
 
@@ -2140,6 +2143,60 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
   </div>
 </div>
 
+<div class="overlay" id="modal-forgot-password">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeForgotPassword()">✕</button>
+
+    <div id="fp-step1">
+      <h2>Reset your password</h2>
+      <div class="modal-sub">Enter your account email and we'll send a 6-digit reset code.</div>
+      <div class="fg fg-icon">
+        <label>Email Address</label>
+        <span class="fi">✉️</span>
+        <input type="email" id="fp-email" placeholder="you@knoskeyeq.edu" autocomplete="email">
+      </div>
+      <div class="auth-err" id="fp-err1" style="display:none;"></div>
+      <div class="modal-acts">
+        <button class="btn btn-ghost btn-sm" onclick="closeForgotPassword()">Cancel</button>
+        <button class="btn btn-blue btn-sm" id="fp-send-btn" onclick="sendResetCode(false)">Send Reset Code</button>
+      </div>
+    </div>
+
+    <div id="fp-step2" style="display:none;">
+      <h2>Check your email</h2>
+      <div class="modal-sub">Enter the 6-digit code we sent, plus your new password.</div>
+      <div class="fg">
+        <label>Reset Code</label>
+        <input type="text" id="fp-code" maxlength="6" inputmode="numeric" placeholder="000000" style="letter-spacing:6px;font-weight:700;text-align:center;">
+      </div>
+      <div class="fg fg-icon">
+        <label>New Password</label>
+        <span class="fi">🔒</span>
+        <input type="password" id="fp-pass1" placeholder="At least 6 characters" autocomplete="new-password">
+      </div>
+      <div class="fg fg-icon">
+        <label>Confirm New Password</label>
+        <span class="fi">🔒</span>
+        <input type="password" id="fp-pass2" placeholder="Re-enter new password" autocomplete="new-password">
+      </div>
+      <div class="auth-err" id="fp-err2" style="display:none;"></div>
+      <div class="modal-acts">
+        <button class="btn btn-ghost btn-sm" onclick="sendResetCode(true)">Resend Code</button>
+        <button class="btn btn-blue btn-sm" id="fp-reset-btn" onclick="submitNewPassword()">Set New Password</button>
+      </div>
+    </div>
+
+    <div id="fp-step3" style="display:none;text-align:center;">
+      <h2>Password updated 🎉</h2>
+      <div class="modal-sub">You can now sign in with your new password.</div>
+      <div class="modal-acts" style="justify-content:center;">
+        <button class="btn btn-blue btn-sm" onclick="closeForgotPassword()">Back to Sign In</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <div class="overlay" id="modal-add-student">
   <div class="modal">
     <button class="modal-close-btn" onclick="closeModal('modal-add-student')">✕</button>
@@ -2421,7 +2478,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 //  sponsor directory with track records
 // ════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbybs3BJmsb_FqpoEhSre0oczlQ2fT13McgKGsI7jIf7u-niMMQ9lxKV_CVmX1joXjxZ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzuBofjqtgWmFuj52YdR2rigYLcqUHiuHNnj_M22DSAC3s53rIzyvOakZ7_4L_8Cnt5/exec';
 let DEMO_MODE = false; // Set to true to use built-in demo data without a backend
 let S = {}; // session
 let _chatTarget = null;
@@ -2593,6 +2650,12 @@ async function demoApi(p) {
     if(u.status==='pending') return {success:false,error:'Account pending approval'};
     const safe = {...u}; delete safe.password;
     return {success:true, user:safe};
+  }
+  if(action==='requestPasswordReset') {
+    return {success:true, message:'If an account exists for that email, a reset code has been sent.'};
+  }
+  if(action==='resetPassword') {
+    return {success:true, message:'Password updated. Please sign in with your new password.'};
   }
   if(action==='read') {
     if(p.sheet==='Users') return DEMO_USERS.map(u=>{const s={...u};delete s.password;return s;});
@@ -2862,6 +2925,67 @@ async function doLogin(){
   startKeepAlive();
   warmCache(); // fire-and-forget — does not delay the welcome page
   showWelcomePage();
+}
+
+// ════════════════════════════════════════════
+//  FORGOT PASSWORD
+// ════════════════════════════════════════════
+let _fpEmail = '';
+
+function openForgotPassword(){
+  $('fp-email').value='';
+  $('fp-code').value='';
+  $('fp-pass1').value='';
+  $('fp-pass2').value='';
+  $('fp-err1').style.display='none';
+  $('fp-err2').style.display='none';
+  $('fp-step1').style.display='block';
+  $('fp-step2').style.display='none';
+  $('fp-step3').style.display='none';
+  openModal('modal-forgot-password');
+}
+function closeForgotPassword(){ closeModal('modal-forgot-password'); }
+
+async function sendResetCode(isResend){
+  const email = isResend ? _fpEmail : $('fp-email').value.trim().toLowerCase();
+  const err = isResend ? $('fp-err2') : $('fp-err1');
+  const btn = $('fp-send-btn');
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    err.style.display='block'; err.textContent='Enter a valid email address.'; return;
+  }
+  _fpEmail = email;
+  err.style.display='none';
+  if(!isResend){ btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending...'; }
+  let res;
+  try{ res = await safePost({action:'requestPasswordReset', email}); } catch(e){ res={success:false}; }
+  if(!isResend){ btn.disabled=false; btn.innerHTML='Send Reset Code'; }
+  if(!res?.success){
+    err.style.display='block'; err.textContent=res?.error||'Something went wrong. Please try again.'; return;
+  }
+  $('fp-step1').style.display='none';
+  $('fp-step2').style.display='block';
+  if(isResend){ toast('A new code has been sent.','ok'); }
+}
+
+async function submitNewPassword(){
+  const code=$('fp-code').value.trim();
+  const p1=$('fp-pass1').value;
+  const p2=$('fp-pass2').value;
+  const err=$('fp-err2');
+  const btn=$('fp-reset-btn');
+  if(!/^\d{6}$/.test(code)){ err.style.display='block'; err.textContent='Enter the 6-digit code from your email.'; return; }
+  if(p1.length<6){ err.style.display='block'; err.textContent='Password must be at least 6 characters.'; return; }
+  if(p1!==p2){ err.style.display='block'; err.textContent='Passwords do not match.'; return; }
+  err.style.display='none';
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Updating...';
+  let res;
+  try{ res = await safePost({action:'resetPassword', email:_fpEmail, code, newPassword:p1}); } catch(e){ res={success:false}; }
+  btn.disabled=false; btn.innerHTML='Set New Password';
+  if(!res?.success){
+    err.style.display='block'; err.textContent=res?.error||'Something went wrong. Please try again.'; return;
+  }
+  $('fp-step2').style.display='none';
+  $('fp-step3').style.display='block';
 }
 
 async function showWelcomePage(){
