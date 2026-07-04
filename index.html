@@ -608,6 +608,8 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 }
 .notif-drawer.open{right:0;}
 #sound-toggle-btn.muted{opacity:.45;}
+.role-chip{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg2);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;user-select:none;}
+.role-chip.selected{background:var(--g-blue);color:white;border-color:transparent;}
 .nd-head{
   padding:18px 20px 14px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-between;
@@ -2197,6 +2199,27 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
   </div>
 </div>
 
+<div class="overlay" id="modal-edit-role">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('modal-edit-role')">✕</button>
+    <h2>Edit Access Level</h2>
+    <div class="modal-sub" id="er-sub"></div>
+    <div class="fg">
+      <label>Primary Role</label>
+      <select id="er-primary-role"></select>
+    </div>
+    <div class="fg">
+      <label>Additional Roles (optional — grants dual/multiple access)</label>
+      <div id="er-extra-roles" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+    </div>
+    <div id="edit-role-msg"></div>
+    <div class="modal-acts">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-role')">Cancel</button>
+      <button class="btn btn-blue btn-sm" onclick="saveUserRole()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="modal-add-student">
   <div class="modal">
     <button class="modal-close-btn" onclick="closeModal('modal-add-student')">✕</button>
@@ -2478,7 +2501,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 //  sponsor directory with track records
 // ════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyM_ca36QQvo-CHixK-zvzhPwXEr1piB6PcSPk2JmxrACzMLNJ13AwYMlHY43JphQ1x/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6nFCYiOg5BHAq7j4jE1v1vMX4AjLM1XliGN1AI0plLlZqKjzs9SWLYTbRcYDqlNZX/exec';
 let S = {}; // session
 
 // ════════════════════════════════════════════
@@ -2596,7 +2619,7 @@ const ROLE_NAV = {
   ],
   knosk_admin: [
     { grp:'Core',    items:[{id:'dashboard',icon:'🏠',lbl:'Dashboard'}] },
-    { grp:'Control', items:[{id:'approvals',icon:'✅',lbl:'Approvals Queue',badge:true},{id:'escalations',icon:'🚨',lbl:'Escalations',badge:true}] },
+    { grp:'Control', items:[{id:'admin-users',icon:'👑',lbl:'User Management'},{id:'approvals',icon:'✅',lbl:'Approvals Queue',badge:true},{id:'escalations',icon:'🚨',lbl:'Escalations',badge:true}] },
     { grp:'Academic',items:[{id:'students',icon:'🎓',lbl:'Students'},{id:'teachers',icon:'👩‍🏫',lbl:'Teachers'},{id:'analytics',icon:'📊',lbl:'Analytics'}] },
     { grp:'More',    items:[{id:'sponsorship',icon:'❤️',lbl:'Sponsorship View'},{id:'programs',icon:'🎯',lbl:'Programs'},{id:'messages',icon:'💬',lbl:'Messages'},{id:'howto',icon:'📖',lbl:'How to Use'}] },
   ],
@@ -2825,6 +2848,61 @@ function uid(){return 'id_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)
 function gi(n){if(!n)return'?';const p=n.trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();}
 function today(){return new Date().toISOString().slice(0,10);}
 function fmtDate(d){if(!d)return'—';try{return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}catch{return d;}}
+
+// ════════════════════════════════════════════
+//  REAL-DATA STAT HELPERS
+//  Every dashboard number must come from actual sheet data —
+//  these small helpers replace what used to be hardcoded/random
+//  placeholder values so nothing on screen is fabricated.
+// ════════════════════════════════════════════
+function avgOf(nums){
+  const clean = (nums||[]).map(Number).filter(n=>!isNaN(n));
+  if(!clean.length) return 0;
+  return Math.round(clean.reduce((a,b)=>a+b,0)/clean.length);
+}
+// Average of a numeric field across a list of students, real classes only.
+function avgField(students, field){
+  return avgOf((students||[]).map(s=>s[field]));
+}
+// Per-class average of a numeric field, for real students only.
+// Classes with no students show 0 rather than a random filler.
+function classAverages(students, field){
+  return CLASSES.map(c=>{
+    const inClass=(students||[]).filter(s=>s.class===c);
+    return {label:c, val: inClass.length ? avgField(inClass, field) : 0};
+  });
+}
+// Weekly attendance trend from real Attendance records (morning+afternoon
+// marks). Returns null if there isn't enough real data yet, so the caller
+// can show an honest "no data" state instead of a fabricated line.
+function weeklyAttendanceTrend(records){
+  if(!records || !records.length) return null;
+  const byWeek={};
+  records.forEach(r=>{
+    if(!r.date) return;
+    const d=new Date(r.date);
+    if(isNaN(d.getTime())) return;
+    // ISO week bucket: yyyy-Www
+    const onejan=new Date(d.getFullYear(),0,1);
+    const week=Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7);
+    const key=d.getFullYear()+'-W'+week;
+    if(!byWeek[key]) byWeek[key]=[];
+    const present = (String(r.morning).toUpperCase()==='TRUE'?1:0) + (String(r.afternoon).toUpperCase()==='TRUE'?1:0);
+    byWeek[key].push(present/2*100);
+  });
+  const keys=Object.keys(byWeek).sort().slice(-6);
+  if(!keys.length) return null;
+  return {
+    labels: keys.map(k=>'W'+k.split('-W')[1]),
+    vals: keys.map(k=>avgOf(byWeek[k]))
+  };
+}
+// A student's current leaderboard rank (1-based) from ExerciseScores, or null.
+function findRank(lb, studentId){
+  const i = (lb||[]).findIndex(s=>s.userId===studentId||s.id===studentId);
+  return i>=0 ? i+1 : null;
+}
+
 function fmtTime(d){if(!d)return'';try{return new Date(d).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
 function greet(){const h=new Date().getHours();return h<12?'Good morning':'h<17'?'Good afternoon':'Good evening';}
 function toast(msg,type='ok'){
@@ -2985,7 +3063,9 @@ function showRoleSelect(){
 }
 
 function buildRoleGrid(){
-  const allowed=ROLE_ACCESS[S.role]||[S.role];
+  const base=ROLE_ACCESS[S.role]||[S.role];
+  const extra=Array.isArray(S.additionalRoles)?S.additionalRoles:[];
+  const allowed=[...new Set([...base,...extra])];
   let html='';
   Object.entries(ROLES).forEach(([key,r])=>{
     const ok=allowed.includes(key);
@@ -3212,23 +3292,39 @@ async function loadDashboard(role){
 
 // ── Management Dashboard (Admin + Cofounder) ──
 async function loadMgmtDash(role){
-  buildSlideshow([
-    {type:'📢 School Broadcast',title:'Welcome to Term 1, 2025/2026',body:'The school management portal is live. All users should complete registration and log in to access their dashboards.',theme:'slide-theme-blue'},
-    {type:'🚨 Escalation Alert',title:'2 Open Concerns Require Attention',body:'MRS IBRAHIM has raised 2 concerns: broken windows (HIGH priority) and textbook shortage (MEDIUM priority). Review in Escalations.',theme:'slide-theme-red'},
-    {type:'❤️ Sponsorship Update',title:'Sponsorship Coverage: 50%',body:'4 of 8 students are currently sponsored. 4 students still need sponsors. Child Sponsorship team to action.',theme:'slide-theme-gold'},
-    {type:'🏆 Top Performer This Week',title:'GRACE ADELEKE — SS1',body:'Highest score: 95 points. Attendance: 98%. Rank #1 overall. Share this achievement with the school community!',theme:'slide-theme-green'},
+  const [students,users,spon,concerns,lb,settingsRows]=await Promise.all([
+    dbRead('Students'),dbRead('Users'),dbRead('Sponsorships'),dbRead('Concerns'),dbRead('ExerciseScores'),dbRead('Settings')
   ]);
-  const [students,users,spon,concerns]=await Promise.all([dbRead('Students'),dbRead('Users'),dbRead('Sponsorships'),dbRead('Concerns')]);
   const teachers=users.filter(u=>u.role==='teacher');
   const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
   const openConcerns=concerns.filter(c=>c.status==='open');
+  const pendingApprovals=users.filter(u=>u.status==='pending').length;
+  const avgAttendance=avgField(students,'attendancePct');
+  const sponsorPct=Math.round(sponsored.length/Math.max(students.length,1)*100);
+  const settings=settingsRows[0]||{};
+  const topStudent=[...lb].sort((a,b)=>(b.total||0)-(a.total||0))[0];
+
+  // Every slide below is generated from the numbers just computed above —
+  // nothing here is pre-written/fabricated, so it always matches reality.
+  const slides=[
+    {type:'📢 School Broadcast',title:`Welcome to ${settings.term||'This Term'}, ${settings.session||'Current Session'}`,body:'The school management portal is live. All users should complete registration and log in to access their dashboards.',theme:'slide-theme-blue'},
+    openConcerns.length
+      ? {type:'🚨 Escalation Alert',title:`${openConcerns.length} Open Concern${openConcerns.length===1?'':'s'} Require Attention`,body:openConcerns.slice(0,2).map(c=>`${c.title} (${(c.priority||'').toUpperCase()} priority)`).join('; ')+'. Review in Escalations.',theme:'slide-theme-red'}
+      : {type:'✅ All Clear',title:'No Open Concerns',body:'There are currently no open concerns awaiting review. Great job keeping things on top of things!',theme:'slide-theme-green'},
+    {type:'❤️ Sponsorship Update',title:`Sponsorship Coverage: ${sponsorPct}%`,body:`${sponsored.length} of ${students.length} student(s) are currently sponsored. ${students.length-sponsored.length} student(s) still need sponsors.`,theme:'slide-theme-gold'},
+    topStudent
+      ? {type:'🏆 Top Performer This Term',title:`${topStudent.name||'—'}${topStudent.class?' — '+topStudent.class:''}`,body:`Leading with ${topStudent.total||0} points on the leaderboard. Share this achievement with the school community!`,theme:'slide-theme-green'}
+      : {type:'🏆 Leaderboard',title:'No Scores Recorded Yet',body:'Once students start completing Daily Exercises, top performers will appear here.',theme:'slide-theme-green'},
+  ];
+  buildSlideshow(slides);
+
   renderStats([
     {icon:'🎓',num:students.length,lbl:'Total Students',css:'sc-blue',trend:'↑ Active'},
     {icon:'👩‍🏫',num:teachers.length,lbl:'Teachers',css:'sc-green',trend:'Active'},
-    {icon:'❤️',num:sponsored.length,lbl:'Sponsored',css:'sc-pink',trend:Math.round(sponsored.length/Math.max(students.length,1)*100)+'%'},
+    {icon:'❤️',num:sponsored.length,lbl:'Sponsored',css:'sc-pink',trend:sponsorPct+'%'},
     {icon:'⚠️',num:students.length-sponsored.length,lbl:'Need Sponsor',css:'sc-red',trend:'Action needed'},
     {icon:'🚨',num:openConcerns.length,lbl:'Open Issues',css:'sc-orange',trend:'Review now'},
-    {icon:'📊',num:'91%',lbl:'Avg Attendance',css:'sc-teal',trend:'↑ Good'},
+    {icon:'📊',num:avgAttendance+'%',lbl:'Avg Attendance',css:'sc-teal',trend:avgAttendance>=80?'↑ Good':'↓ Needs attention'},
   ]);
   // Mini charts + leaderboard
   $('dash-widgets').innerHTML=`
@@ -3271,15 +3367,14 @@ async function loadMgmtDash(role){
         <div class="ct-body">
           <div class="ct-row"><span class="ct-label">🎓 Students Present</span><span class="ct-val" style="color:var(--green)">—</span></div>
           <div class="ct-row"><span class="ct-label">👩‍🏫 Teachers Active</span><span class="ct-val" style="color:var(--blue)">${teachers.length}</span></div>
-          <div class="ct-row"><span class="ct-label">✅ Pending Approvals</span><span class="ct-val" style="color:var(--gold-dark)">2</span></div>
+          <div class="ct-row"><span class="ct-label">✅ Pending Approvals</span><span class="ct-val" style="color:var(--gold-dark)">${pendingApprovals}</span></div>
           <div class="ct-row"><span class="ct-label">🚨 Open Concerns</span><span class="ct-val" style="color:var(--red)">${openConcerns.length}</span></div>
-          <div class="ct-row"><span class="ct-label">❤️ Sponsorship %</span><span class="ct-val">${Math.round(sponsored.length/Math.max(students.length,1)*100)}%</span></div>
-          <div class="ct-row" style="border-bottom:none;"><span class="ct-label">📅 Attendance %</span><span class="ct-val" style="color:var(--green)">91%</span></div>
+          <div class="ct-row"><span class="ct-label">❤️ Sponsorship %</span><span class="ct-val">${sponsorPct}%</span></div>
+          <div class="ct-row" style="border-bottom:none;"><span class="ct-label">📅 Attendance %</span><span class="ct-val" style="color:var(--green)">${avgAttendance}%</span></div>
         </div>
       </div>
     </div>`;
   // Populate leaderboard
-  const lb=await dbRead('ExerciseScores');
   $('dash-lb').innerHTML=lb.slice(0,5).map((s,i)=>`
     <div class="lb-item">
       <div class="lb-rank ${['r1','r2','r3','rn','rn'][i]}">${['🥇','🥈','🥉',4,5][i]}</div>
@@ -3293,40 +3388,66 @@ async function loadMgmtDash(role){
       <div class="concern-title">${c.title}</div>
       <div class="concern-meta">${c.raisedByName} · ${c.category} · <span class="badge b-${c.priority==='high'?'red':c.priority==='medium'?'gold':'blue'}">${c.priority}</span></div>
     </div>`).join('')||'<div class="empty"><p>No open concerns</p></div>';
-  // Mini class performance chart
+  // Mini class performance chart — real per-class average attendance
   setTimeout(()=>drawBarChart('dash-class-chart',
-    CLASSES.map(c=>({label:c,val:Math.floor(65+Math.random()*30),color:'rgba(27,79,168,0.8)'}))),200);
+    classAverages(students,'attendancePct').map(c=>({label:c.label,val:c.val,color:'rgba(27,79,168,0.8)'}))),200);
 }
 
 // ── Knosk Admin Dashboard (Control Tower) ──
 async function loadKnoskAdminDash(){
-  buildSlideshow([
-    {type:'✅ APPROVAL REQUIRED',title:'2 Items Pending Your Approval',body:'Teacher content uploads and 1 program submission are waiting. Nothing goes live until you approve.',theme:'slide-theme-navy'},
-    {type:'🚨 ESCALATION ALERT',title:'High Priority Concern — Infrastructure',body:'Broken windows in JSS1 reported by MRS IBRAHIM. Requires immediate action or escalation to Co-founders.',theme:'slide-theme-red'},
-    {type:'📊 ACADEMIC MONITOR',title:'Term 1 Mid-Term Performance Update',body:'JSS1 leads with 88% class average. SS2 requires intervention — average dropped from 78% to 71% this week.',theme:'slide-theme-blue'},
-    {type:'📅 ATTENDANCE ALERT',title:'Student Attendance Below Threshold',body:'TAIWO OLUWOLE (SS2) attendance at 75% — below the 80% minimum. Parent notification recommended.',theme:'slide-theme-gold'},
+  const [students,users,concerns,content,progs,announcements,attendance]=await Promise.all([
+    dbRead('Students'),dbRead('Users'),dbRead('Concerns'),dbRead('Content'),dbRead('Programs'),dbRead('Announcements'),dbRead('Attendance')
   ]);
-  const [students,users,concerns]=await Promise.all([dbRead('Students'),dbRead('Users'),dbRead('Concerns')]);
+  const openConcerns=concerns.filter(c=>c.status==='open');
+  const pendingContent=content.filter(c=>c.status==='pending');
+  const pendingPrograms=progs.filter(p=>p.status==='pending');
+  const pendingAnnouncements=announcements.filter(a=>a.status==='pending');
+  const pendingApprovals=pendingContent.length+pendingPrograms.length+pendingAnnouncements.length;
+  const avgAttendance=avgField(students,'attendancePct');
+  const classAvgs=classAverages(students,'attendancePct');
+  const bestClass=[...classAvgs].sort((a,b)=>b.val-a.val)[0];
+  const worstClass=[...classAvgs].sort((a,b)=>a.val-b.val)[0];
+  const atRiskStudents=students.filter(s=>(s.attendancePct||0)<80);
+  const lowestAttendance=[...students].filter(s=>s.attendancePct!=null).sort((a,b)=>(a.attendancePct||0)-(b.attendancePct||0))[0];
+  const topConcern=[...openConcerns].sort((a,b)=>(a.priority==='high'?-1:1))[0];
+
+  const slides=[
+    pendingApprovals
+      ? {type:'✅ APPROVAL REQUIRED',title:`${pendingApprovals} Item${pendingApprovals===1?'':'s'} Pending Your Approval`,body:`${pendingContent.length} content upload(s), ${pendingPrograms.length} program(s), ${pendingAnnouncements.length} announcement(s) awaiting review. Nothing goes live until you approve.`,theme:'slide-theme-navy'}
+      : {type:'✅ ALL CAUGHT UP',title:'Nothing Pending Approval',body:'There is currently no teacher content, program, or announcement waiting on your review.',theme:'slide-theme-navy'},
+    topConcern
+      ? {type:'🚨 ESCALATION ALERT',title:`${(topConcern.priority||'').toUpperCase()} Priority — ${topConcern.category||'Concern'}`,body:`${topConcern.title} — raised by ${topConcern.raisedByName||'a staff member'}. Requires review or escalation to Co-founders.`,theme:'slide-theme-red'}
+      : {type:'🚨 ESCALATIONS', title:'No Open Concerns',body:'There are no escalations currently requiring attention.',theme:'slide-theme-red'},
+    (bestClass&&bestClass.val>0)
+      ? {type:'📊 ACADEMIC MONITOR',title:'Class Attendance Snapshot',body:`${bestClass.label} leads with ${bestClass.val}% average attendance.${worstClass&&worstClass.label!==bestClass.label?` ${worstClass.label} is lowest at ${worstClass.val}% and may need intervention.`:''}`,theme:'slide-theme-blue'}
+      : {type:'📊 ACADEMIC MONITOR',title:'No Attendance Data Yet',body:'Once attendance is recorded for classes, a performance snapshot will appear here.',theme:'slide-theme-blue'},
+    lowestAttendance
+      ? {type:'📅 ATTENDANCE ALERT',title:`${lowestAttendance.name} — ${(lowestAttendance.attendancePct||0)}% Attendance`,body:(lowestAttendance.attendancePct||0)<80?'Below the 80% minimum threshold. Parent notification recommended.':'Attendance is currently the lowest on record but still within a healthy range.',theme:'slide-theme-gold'}
+      : {type:'📅 ATTENDANCE',title:'No Student Attendance Recorded Yet',body:'Attendance alerts will appear here once records are logged.',theme:'slide-theme-gold'},
+  ];
+  buildSlideshow(slides);
+
   renderStats([
     {icon:'🎓',num:students.filter(s=>s.status==='active').length,lbl:'Active Students',css:'sc-blue'},
     {icon:'👩‍🏫',num:users.filter(u=>u.role==='teacher').length,lbl:'Teachers',css:'sc-green'},
-    {icon:'⏳',num:2,lbl:'Pending Approvals',css:'sc-gold',trend:'Action needed'},
-    {icon:'🚨',num:concerns.filter(c=>c.status==='open').length,lbl:'Open Issues',css:'sc-red',trend:'Review now'},
-    {icon:'📅',num:'91%',lbl:'Attendance Today',css:'sc-teal'},
-    {icon:'⚠️',num:students.filter(s=>(s.attendancePct||0)<80).length,lbl:'At-Risk Students',css:'sc-orange'},
+    {icon:'⏳',num:pendingApprovals,lbl:'Pending Approvals',css:'sc-gold',trend:pendingApprovals?'Action needed':'All clear'},
+    {icon:'🚨',num:openConcerns.length,lbl:'Open Issues',css:'sc-red',trend:'Review now'},
+    {icon:'📅',num:avgAttendance+'%',lbl:'Avg Attendance',css:'sc-teal'},
+    {icon:'⚠️',num:atRiskStudents.length,lbl:'At-Risk Students',css:'sc-orange'},
   ]);
+  const attendanceTrend=weeklyAttendanceTrend(attendance);
   $('dash-widgets').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;">
       <div class="ct-panel">
         <div class="ct-header"><h3>📈 Performance Panel</h3></div>
         <div class="ct-body" id="dash-ka-perf">
-          ${CLASSES.map(c=>{const pct=Math.floor(68+Math.random()*25);return`<div class="ct-row"><span class="ct-label">${c}</span><span class="ct-val">${pct}%</span></div>`;}).join('')}
+          ${classAvgs.map(c=>`<div class="ct-row"><span class="ct-label">${c.label}</span><span class="ct-val">${c.val}%</span></div>`).join('')}
         </div>
       </div>
       <div class="ct-panel">
         <div class="ct-header"><h3>🚨 Escalation Queue</h3></div>
         <div class="ct-body" id="dash-ka-concerns">
-          ${concerns.filter(c=>c.status==='open').slice(0,4).map(c=>`
+          ${openConcerns.slice(0,4).map(c=>`
             <div class="ct-row"><span class="ct-label" style="font-size:12px;">${c.title.slice(0,30)}...</span><span class="badge b-${c.priority==='high'?'red':'gold'}">${c.priority}</span></div>
           `).join('')||'<div style="font-size:12px;color:var(--muted);padding:8px 0;">No open issues</div>'}
         </div>
@@ -3334,15 +3455,15 @@ async function loadKnoskAdminDash(){
       <div class="ct-panel">
         <div class="ct-header"><h3>📢 Pending Content</h3></div>
         <div class="ct-body">
-          <div class="ct-row"><span class="ct-label">Teacher uploads</span><span class="ct-val">2</span></div>
-          <div class="ct-row"><span class="ct-label">Program submissions</span><span class="ct-val">1</span></div>
-          <div class="ct-row"><span class="ct-label">Announcements</span><span class="ct-val">0</span></div>
+          <div class="ct-row"><span class="ct-label">Teacher uploads</span><span class="ct-val">${pendingContent.length}</span></div>
+          <div class="ct-row"><span class="ct-label">Program submissions</span><span class="ct-val">${pendingPrograms.length}</span></div>
+          <div class="ct-row"><span class="ct-label">Announcements</span><span class="ct-val">${pendingAnnouncements.length}</span></div>
           <div class="ct-row" style="border:none;padding-top:10px;"><button class="btn btn-blue btn-xs" onclick="showView('approvals')">Review Queue →</button></div>
         </div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-      <div class="card"><div class="card-header"><div class="card-title">📊 Attendance Trend</div><div class="live-dot">Live</div></div><div class="card-body"><canvas id="dash-ka-att" class="chart-canvas"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">📊 Attendance Trend</div>${attendanceTrend?'<div class="live-dot">Live</div>':''}</div><div class="card-body">${attendanceTrend?'<canvas id="dash-ka-att" class="chart-canvas"></canvas>':'<div class="empty" style="padding:30px 0;"><p style="color:var(--muted);font-size:13px;">No attendance records yet — this chart will populate once attendance is taken.</p></div>'}</div></div>
       <div class="card"><div class="card-header"><div class="card-title">⚠️ At-Risk Students</div></div><div class="card-body">
         ${students.filter(s=>(s.attendancePct||100)<80||(s.points||100)<40).slice(0,4).map(s=>`
           <div class="list-item risk-${(s.attendancePct||0)<70?'high':'med'}" style="margin-bottom:6px;">
@@ -3352,24 +3473,35 @@ async function loadKnoskAdminDash(){
           </div>`).join('')||'<div class="empty"><p>No at-risk students</p></div>'}
       </div></div>
     </div>`;
-  setTimeout(()=>drawLineChart('dash-ka-att'),200);
+  if(attendanceTrend) setTimeout(()=>drawLineChart('dash-ka-att',attendanceTrend),200);
 }
 
 // ── Child Sponsorship Dashboard ──
 async function loadSponsorshipDash(){
-  buildSlideshow([
-    {type:'❤️ SPONSORSHIP FOCUS',title:'4 Students Still Need Sponsors',body:'Active outreach recommended. Each student needs ₦3,100/month. Contact Co-founders for sponsor leads.',theme:'slide-theme-gold'},
-    {type:'⚠️ AT-RISK ALERT',title:'TAIWO OLUWOLE — Low Attendance',body:'Sponsored student with 75% attendance. Follow up with parent and sponsor. Attendance threshold is 80%.',theme:'slide-theme-red'},
-    {type:'📊 SPONSORSHIP HEALTH',title:'50% Coverage This Term',body:'4 of 8 students are sponsored. DR SARAH FOUNDATION sponsors 2 students. MR BLESSING DONOR sponsors 2 students.',theme:'slide-theme-teal'},
-    {type:'📥 DATA IMPORT',title:'Historical Records Import Available',body:'Use the Bulk Import tool to upload old sponsorship records. Maintain the defined CSV format for 100% accuracy.',theme:'slide-theme-navy'},
-  ]);
   const [students,spon]=await Promise.all([dbRead('Students'),dbRead('Sponsorships')]);
   const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const unsponsoredCount=students.length-sponsored.length;
+  const coveragePct=Math.round(sponsored.length/Math.max(students.length,1)*100);
+  const atRiskSponsored=students.filter(s=>sponsored.includes(s.id)&&(s.attendancePct||100)<80)[0];
+  const sponsorCounts={};
+  spon.filter(s=>s.status==='active').forEach(s=>{sponsorCounts[s.sponsorName]=(sponsorCounts[s.sponsorName]||0)+1;});
+  const topSponsors=Object.entries(sponsorCounts).sort((a,b)=>b[1]-a[1]).slice(0,2);
+
+  buildSlideshow([
+    unsponsoredCount
+      ? {type:'❤️ SPONSORSHIP FOCUS',title:`${unsponsoredCount} Student${unsponsoredCount===1?'':'s'} Still Need${unsponsoredCount===1?'s':''} Sponsors`,body:'Active outreach recommended. Contact Co-founders for sponsor leads.',theme:'slide-theme-gold'}
+      : {type:'❤️ SPONSORSHIP FOCUS',title:'All Students Are Sponsored',body:'Every registered student currently has an active sponsor. Great work!',theme:'slide-theme-gold'},
+    atRiskSponsored
+      ? {type:'⚠️ AT-RISK ALERT',title:`${atRiskSponsored.name} — Low Attendance`,body:`Sponsored student with ${atRiskSponsored.attendancePct}% attendance. Follow up with parent and sponsor. Attendance threshold is 80%.`,theme:'slide-theme-red'}
+      : {type:'⚠️ AT-RISK ALERT',title:'No At-Risk Sponsored Students',body:'None of your currently sponsored students are below the 80% attendance threshold.',theme:'slide-theme-red'},
+    {type:'📊 SPONSORSHIP HEALTH',title:`${coveragePct}% Coverage This Term`,body:`${sponsored.length} of ${students.length} students are sponsored.${topSponsors.length?' '+topSponsors.map(([n,c])=>`${n} sponsors ${c} student${c===1?'':'s'}`).join('. ')+'.':''}`,theme:'slide-theme-teal'},
+    {type:'📥 DATA IMPORT',title:'Historical Records Import Available',body:'Use the Bulk Import tool to upload old sponsorship records. Maintain the defined CSV format for accuracy.',theme:'slide-theme-navy'},
+  ]);
   renderStats([
     {icon:'🎓',num:students.length,lbl:'Total Students',css:'sc-blue'},
     {icon:'✅',num:sponsored.length,lbl:'Active Sponsorship',css:'sc-green'},
     {icon:'⚠️',num:students.length-sponsored.length,lbl:'No Sponsor Yet',css:'sc-red'},
-    {icon:'💰',num:'₦'+((sponsored.length*3100)).toLocaleString(),lbl:'Monthly Funding',css:'sc-gold'},
+    {icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Monthly Funding',css:'sc-gold'},
     {icon:'🔴',num:students.filter(s=>(s.attendancePct||100)<80).length,lbl:'At-Risk',css:'sc-orange'},
     {icon:'🤝',num:[...new Set(spon.map(s=>s.sponsorId))].length,lbl:'Active Sponsors',css:'sc-teal'},
   ]);
@@ -3439,7 +3571,7 @@ async function loadProgramsDash(){
   renderStats([
     {icon:'🎯',num:progs.filter(p=>p.status==='active').length,lbl:'Active Programs',css:'sc-blue'},
     {icon:'👥',num:progs.reduce((a,p)=>a+Number(p.participants||0),0),lbl:'Participants',css:'sc-green'},
-    {icon:'📊',num:'86%',lbl:'Avg Engagement',css:'sc-gold'},
+    {icon:'📊',num:avgField(progs,'engagement')+'%',lbl:'Avg Engagement',css:'sc-gold'},
     {icon:'⏳',num:progs.filter(p=>p.status==='pending').length,lbl:'Pending Approval',css:'sc-orange'},
   ]);
   $('dash-widgets').innerHTML=`<div class="prog-cards">${progs.map(p=>renderProgCard(p)).join('')}</div>`;
@@ -3447,24 +3579,36 @@ async function loadProgramsDash(){
 
 // ── Teacher Dashboard ──
 async function loadTeacherDash(){
-  buildSlideshow([
-    {type:'📋 CONTENT REMINDER',title:'Upload This Week\'s Scheme of Work',body:'Week 3 scheme of work is due. Students and Knosk Admin are expecting your uploads. Go to Upload Content.',theme:'slide-theme-green'},
-    {type:'🏆 CLASS LEADERBOARD',title:'Top Performer: CHIDINMA OKAFOR',body:'JSS1 top student with 92 points and 96% attendance. Keep encouraging your students through daily exercises!',theme:'slide-theme-blue'},
-    {type:'📢 FROM KNOSK ADMIN',title:'Mid-Term Parent-Teacher Meeting',body:'Scheduled for Friday 3rd May, 2025 at 10am. All teachers are required to prepare student progress reports.',theme:'slide-theme-gold'},
-    {type:'❤️ SPONSORSHIP NOTE',title:'2 of Your Students Need Sponsors',body:'TAIWO OLUWOLE and EMEKA OBI are unsponsored. Kindly refer their details to the Child Sponsorship team.',theme:'slide-theme-teal'},
-  ]);
-  const [students,spon]=await Promise.all([dbRead('Students'),dbRead('Sponsorships')]);
-  const mySubjects=S.subjects||{Jss1:['Mathematics']};
+  const [students,spon,lbAll,meetings]=await Promise.all([dbRead('Students'),dbRead('Sponsorships'),dbRead('ExerciseScores'),dbRead('Meetings')]);
+  const mySubjects=S.subjects||{};
   const myClasses=Object.keys(mySubjects);
   const myStudents=students.filter(s=>myClasses.includes(s.class)||(s.class&&myClasses.some(c=>c.startsWith(s.class))));
   const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const myStudentIds=myStudents.map(s=>s.id);
+  const myTopScore=[...lbAll].filter(s=>myStudentIds.includes(s.userId)||myClasses.includes(s.class)).sort((a,b)=>(b.total||0)-(a.total||0))[0];
+  const unsponsoredMine=myStudents.filter(s=>!sponsored.includes(s.id));
+  const nextMeeting=[...meetings].filter(m=>new Date(m.datetime)>=new Date()).sort((a,b)=>new Date(a.datetime)-new Date(b.datetime))[0];
+  const classAttendance=avgField(myStudents,'attendancePct');
+
+  buildSlideshow([
+    {type:'📋 CONTENT REMINDER',title:'Keep Your Uploads Current',body:'Students and Knosk Admin rely on your latest scheme of work. Go to Upload Content to add this week\'s material.',theme:'slide-theme-green'},
+    myTopScore
+      ? {type:'🏆 CLASS LEADERBOARD',title:`Top Performer: ${myTopScore.name||'—'}`,body:`${myTopScore.total||0} points on the leaderboard. Keep encouraging your students through daily exercises!`,theme:'slide-theme-blue'}
+      : {type:'🏆 CLASS LEADERBOARD',title:'No Scores Recorded Yet',body:'Once your students complete Daily Exercises, top performers will appear here.',theme:'slide-theme-blue'},
+    nextMeeting
+      ? {type:'📢 UPCOMING MEETING',title:nextMeeting.title,body:`Scheduled for ${fmtDate(nextMeeting.datetime)}. ${nextMeeting.description||''}`,theme:'slide-theme-gold'}
+      : {type:'📢 FROM KNOSK ADMIN',title:'No Meetings Scheduled',body:'There are currently no upcoming live meetings on your calendar.',theme:'slide-theme-gold'},
+    unsponsoredMine.length
+      ? {type:'❤️ SPONSORSHIP NOTE',title:`${unsponsoredMine.length} of Your Students Need Sponsors`,body:`${unsponsoredMine.slice(0,3).map(s=>s.name).join(', ')} ${unsponsoredMine.length>3?'and others are':'are'} unsponsored. Kindly refer their details to the Child Sponsorship team.`,theme:'slide-theme-teal'}
+      : {type:'❤️ SPONSORSHIP NOTE',title:'All Your Students Are Sponsored',body:'Every student in your classes currently has an active sponsor.',theme:'slide-theme-teal'},
+  ]);
   renderStats([
     {icon:'👨‍🎓',num:myStudents.length,lbl:'My Students',css:'sc-blue'},
     {icon:'📚',num:Object.values(mySubjects).flat().length,lbl:'Subjects',css:'sc-green'},
-    {icon:'📅',num:'88%',lbl:'Class Attendance',css:'sc-teal'},
-    {icon:'⚠️',num:myStudents.filter(s=>!sponsored.includes(s.id)).length,lbl:'Unsponsored',css:'sc-red'},
+    {icon:'📅',num:classAttendance+'%',lbl:'Class Attendance',css:'sc-teal'},
+    {icon:'⚠️',num:unsponsoredMine.length,lbl:'Unsponsored',css:'sc-red'},
   ]);
-  const lb=await dbRead('ExerciseScores');
+  const lb=lbAll;
   $('dash-widgets').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
       <div class="lb-wrap">
@@ -3498,19 +3642,31 @@ async function loadTeacherDash(){
 
 // ── Student Dashboard ──
 async function loadStudentDash(){
+  const [lb,content,meetings]=await Promise.all([dbRead('ExerciseScores'),dbRead('Content'),dbRead('Meetings')]);
+  const myRank=findRank(lb,S.id);
+  const leader=lb[0];
+  const pointsToNext=(myRank&&myRank>1)?Math.max((lb[myRank-2].total||0)-(S.points||0),0):0;
+  const myContent=content.filter(c=>c.status==='approved'&&c.class===S.class).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))[0];
+  const nextMeeting=[...meetings].filter(m=>new Date(m.datetime)>=new Date()).sort((a,b)=>new Date(a.datetime)-new Date(b.datetime))[0];
+
   buildSlideshow([
-    {type:'📚 LEARNING UPDATE',title:'New Assignment: Mathematics Week 3',body:'MRS IBRAHIM has uploaded a new Mathematics assignment. Go to My Subjects → Mathematics to access it.',theme:'slide-theme-blue'},
-    {type:'✏️ DAILY EXERCISE',title:'Today\'s Questions Are Ready!',body:'Answer 2 questions today and earn up to 20 points. Consistent practice = higher leaderboard rank!',theme:'slide-theme-green'},
-    {type:'🏆 LEADERBOARD NEWS',title:'You Are Currently Ranked #3',body:'GRACE ADELEKE leads with 95 points. You need 10 more points to reach #2. Keep it up!',theme:'slide-theme-navy'},
-    {type:'📢 SCHOOL NOTICE',title:'Mid-Term Parent-Teacher Meeting',body:'Friday, 3rd May 2025, 10am. Please remind your parents/guardians about this important meeting.',theme:'slide-theme-gold'},
+    myContent
+      ? {type:'📚 LEARNING UPDATE',title:`New ${myContent.subject||'Content'}: ${myContent.title}`,body:`Uploaded by ${myContent.uploadedByName||'your teacher'}. Go to My Subjects → ${myContent.subject||''} to access it.`,theme:'slide-theme-blue'}
+      : {type:'📚 LEARNING UPDATE',title:'No New Content Yet',body:'Check back soon — your teachers will post new material here as it becomes available.',theme:'slide-theme-blue'},
+    {type:'✏️ DAILY EXERCISE',title:'Today\'s Exercise Is Ready!',body:'Answer today\'s questions to earn points. Consistent practice = higher leaderboard rank!',theme:'slide-theme-green'},
+    myRank
+      ? {type:'🏆 LEADERBOARD NEWS',title:`You Are Currently Ranked #${myRank}`,body:myRank>1?`${leader?.name||'The leader'} leads with ${leader?.total||0} points.${pointsToNext?` You need ${pointsToNext} more point(s) to move up a rank.`:''} Keep it up!`:'You are leading the leaderboard! Keep it up!',theme:'slide-theme-navy'}
+      : {type:'🏆 LEADERBOARD NEWS',title:'You Haven\'t Been Ranked Yet',body:'Complete a Daily Exercise to appear on the leaderboard.',theme:'slide-theme-navy'},
+    nextMeeting
+      ? {type:'📢 SCHOOL NOTICE',title:nextMeeting.title,body:`${fmtDate(nextMeeting.datetime)}. ${nextMeeting.description||'Please remind your parents/guardians about this.'}`,theme:'slide-theme-gold'}
+      : {type:'📢 SCHOOL NOTICE',title:'No Upcoming Notices',body:'There are currently no scheduled school-wide meetings or notices.',theme:'slide-theme-gold'},
   ]);
   renderStats([
     {icon:'⭐',num:S.points||0,lbl:'My Points',css:'sc-gold',trend:'Keep earning!'},
     {icon:'📅',num:(S.attendancePct||0)+'%',lbl:'Attendance',css:'sc-green',trend:S.attendancePct>=80?'✓ Good':'↓ At risk'},
-    {icon:'🏆',num:'#3',lbl:'My Rank',css:'sc-blue',trend:'This Term'},
+    {icon:'🏆',num:myRank?'#'+myRank:'—',lbl:'My Rank',css:'sc-blue',trend:'This Term'},
     {icon:'📚',num:S.class||'—',lbl:'My Class',css:'sc-purple'},
   ]);
-  const lb=await dbRead('ExerciseScores');
   $('dash-widgets').innerHTML=`
     <div class="lb-wrap" style="margin-bottom:14px;">
       <div class="lb-head"><h3>🏆 Class Leaderboard</h3>
@@ -3538,31 +3694,42 @@ async function loadStudentDash(){
 
 // ── Sponsor Dashboard ──
 async function loadSponsorDash(){
+  const [spon,students,lb]=await Promise.all([dbRead('Sponsorships'),dbRead('Students'),dbRead('ExerciseScores')]);
+  const mine=spon.filter(s=>s.sponsorId===S.id);
+  const mineWithStudent=mine.map(s=>({...s, student: students.find(st=>st.id===s.studentId)}));
+  const avgPerformance=avgOf(mineWithStudent.map(m=>m.student?.points).filter(v=>v!=null));
+  const avgAttendance=avgOf(mineWithStudent.map(m=>m.student?.attendancePct).filter(v=>v!=null));
+  const spotlight=mineWithStudent[0];
+  const spotlightRank=spotlight?.student?findRank(lb,spotlight.student.id):null;
+
   buildSlideshow([
     {type:'🤝 YOUR IMPACT',title:'Thank You for Supporting These Children',body:'Your monthly contribution is directly funding education for students who would otherwise have no access. You are changing lives.',theme:'slide-theme-gold'},
-    {type:'📊 STUDENT PROGRESS',title:'ADEBAYO JAMES — Week 3 Update',body:'Score: 85 points. Attendance: 92%. Rank: #3 in class. Excellent progress this term!',theme:'slide-theme-blue'},
-    {type:'📢 MESSAGE FROM SCHOOL',title:'First-Term Results Available',body:'Your sponsored students have completed their mid-term assessments. Results will be shared by the Co-founders.',theme:'slide-theme-teal'},
+    spotlight?.student
+      ? {type:'📊 STUDENT PROGRESS',title:`${spotlight.studentName} — Latest Update`,body:`Score: ${spotlight.student.points||0} points. Attendance: ${spotlight.student.attendancePct||0}%.${spotlightRank?` Rank: #${spotlightRank}.`:''} Thank you for your continued support!`,theme:'slide-theme-blue'}
+      : {type:'📊 STUDENT PROGRESS',title:'No Sponsored Students Yet',body:'Once you sponsor a student, their progress updates will appear here.',theme:'slide-theme-blue'},
+    {type:'📢 MESSAGE FROM SCHOOL',title:'Results Are Shared By The School',body:'Your sponsored students\' assessment results will be shared by the Co-founders as they become available.',theme:'slide-theme-teal'},
   ]);
-  const spon=await dbRead('Sponsorships');
-  const mine=spon.filter(s=>s.sponsorId===S.id);
   renderStats([
     {icon:'🤝',num:mine.length,lbl:'Students I Support',css:'sc-blue'},
     {icon:'💰',num:'₦'+mine.reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Monthly Giving',css:'sc-gold'},
-    {icon:'📊',num:'85%',lbl:'Avg Performance',css:'sc-green'},
-    {icon:'📅',num:'92%',lbl:'Avg Attendance',css:'sc-teal'},
+    {icon:'📊',num:mineWithStudent.some(m=>m.student)?avgPerformance:'—',lbl:'Avg Performance',css:'sc-green'},
+    {icon:'📅',num:mineWithStudent.some(m=>m.student)?avgAttendance+'%':'—',lbl:'Avg Attendance',css:'sc-teal'},
   ]);
-  $('dash-widgets').innerHTML=mine.map(s=>`
+  $('dash-widgets').innerHTML=mineWithStudent.map(s=>{
+    const st=s.student;
+    const rank=st?findRank(lb,st.id):null;
+    return`
     <div style="background:white;border-radius:var(--r);border:1px solid var(--border2);box-shadow:var(--sh-card);overflow:hidden;margin-bottom:14px;">
       <div style="background:var(--g-gold);padding:18px 20px;display:flex;align-items:center;gap:14px;">
         <div style="width:52px;height:52px;border-radius:50%;border:3px solid rgba(255,255,255,.3);background:var(--g-navy);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:white;">${gi(s.studentName||'S')}</div>
         <div><div style="font-size:16px;font-weight:800;color:white;">${s.studentName}</div><div style="font-size:11px;color:rgba(255,255,255,.8);">Sponsored since ${fmtDate(s.startDate)} · ₦${Number(s.amount||0).toLocaleString()}/month</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--border2);">
-        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--blue);">85</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Avg Score</div></div>
-        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--green);">92%</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Attendance</div></div>
-        <div style="padding:14px;text-align:center;"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--gold-dark);">#3</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Class Rank</div></div>
+        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--blue);">${st?.points??'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Avg Score</div></div>
+        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--green);">${st?.attendancePct!=null?st.attendancePct+'%':'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Attendance</div></div>
+        <div style="padding:14px;text-align:center;"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--gold-dark);">${rank?'#'+rank:'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Class Rank</div></div>
       </div>
-    </div>`).join('')||'<div class="empty"><div class="empty-icon">🤝</div><p>No students assigned yet. Contact the school.</p></div>';
+    </div>`;}).join('')||'<div class="empty"><div class="empty-icon">🤝</div><p>No students assigned yet. Contact the school.</p></div>';
 }
 
 // ════════════════════════════════════════════
@@ -3639,29 +3806,33 @@ function drawBarChart(canvasId, data){
     ctx.fillText(d.label,x+bw/2,H-6);
   });
 }
-function drawLineChart(canvasId){
+function drawLineChart(canvasId, trend){
   const c=document.getElementById(canvasId);if(!c)return;
+  if(!trend || !trend.vals || !trend.vals.length) return; // no real data — caller shows a "no data" message instead
   const ctx=c.getContext('2d');
   const dpr=window.devicePixelRatio||1;
   const W=c.offsetWidth||480;const H=200;
   c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,W,H);
-  const weeks=['W1','W2','W3','W4','W5','W6'];
-  const vals=[82,85,88,86,91,89];
+  const weeks=trend.labels;
+  const vals=trend.vals;
   const padL=44;const padB=32;const padR=14;const padT=18;
   const chartH=H-padB-padT;const chartW=W-padL-padR;
-  const stepX=chartW/(weeks.length-1);
-  const minV=70;const rangeV=30;
+  const stepX=weeks.length>1?chartW/(weeks.length-1):0;
+  const dataMin=Math.min(...vals),dataMax=Math.max(...vals);
+  const minV=Math.max(0,Math.floor((dataMin-5)/5)*5);
+  const maxV=Math.min(100,Math.ceil((dataMax+5)/5)*5);
+  const rangeV=Math.max(maxV-minV,5);
 
   // BG
   const bg=ctx.createLinearGradient(0,0,0,H);
   bg.addColorStop(0,'rgba(235,243,255,0.5)');bg.addColorStop(1,'rgba(235,243,255,0.1)');
   ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
 
-  // Grid
+  // Grid — ticks scaled to the real data range
   ctx.setLineDash([3,4]);ctx.strokeStyle='rgba(27,79,168,.10)';ctx.lineWidth=1;
-  [75,80,85,90,95].forEach(v=>{
+  [0,1,2,3,4].map(i=>Math.round(minV+rangeV*i/4)).forEach(v=>{
     const y=padT+chartH-Math.floor((v-minV)/rangeV*chartH);
     ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(W-padR,y);ctx.stroke();
     ctx.fillStyle='rgba(30,50,100,.38)';ctx.font='600 10px DM Sans';ctx.textAlign='right';
@@ -3671,31 +3842,33 @@ function drawLineChart(canvasId){
 
   const pts=vals.map((v,i)=>({x:padL+i*stepX,y:padT+chartH-Math.floor((v-minV)/rangeV*chartH)}));
 
-  // Glow area
-  ctx.save();
-  ctx.shadowColor='rgba(27,79,168,.35)';ctx.shadowBlur=8;
-  const ag=ctx.createLinearGradient(0,padT,0,padT+chartH);
-  ag.addColorStop(0,'rgba(58,123,255,.30)');ag.addColorStop(.6,'rgba(27,79,168,.12)');ag.addColorStop(1,'rgba(27,79,168,0)');
-  ctx.fillStyle=ag;
-  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-  for(let i=1;i<pts.length;i++){
-    const mx=(pts[i-1].x+pts[i].x)/2;
-    ctx.bezierCurveTo(mx,pts[i-1].y,mx,pts[i].y,pts[i].x,pts[i].y);
-  }
-  ctx.lineTo(pts[pts.length-1].x,padT+chartH);ctx.lineTo(pts[0].x,padT+chartH);ctx.closePath();
-  ctx.fill();ctx.restore();
+  if(pts.length>1){
+    // Glow area
+    ctx.save();
+    ctx.shadowColor='rgba(27,79,168,.35)';ctx.shadowBlur=8;
+    const ag=ctx.createLinearGradient(0,padT,0,padT+chartH);
+    ag.addColorStop(0,'rgba(58,123,255,.30)');ag.addColorStop(.6,'rgba(27,79,168,.12)');ag.addColorStop(1,'rgba(27,79,168,0)');
+    ctx.fillStyle=ag;
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++){
+      const mx=(pts[i-1].x+pts[i].x)/2;
+      ctx.bezierCurveTo(mx,pts[i-1].y,mx,pts[i].y,pts[i].x,pts[i].y);
+    }
+    ctx.lineTo(pts[pts.length-1].x,padT+chartH);ctx.lineTo(pts[0].x,padT+chartH);ctx.closePath();
+    ctx.fill();ctx.restore();
 
-  // Smooth line
-  ctx.save();ctx.shadowColor='rgba(27,79,168,.5)';ctx.shadowBlur=6;
-  const lg=ctx.createLinearGradient(padL,0,W-padR,0);
-  lg.addColorStop(0,'rgba(58,123,255,.95)');lg.addColorStop(.5,'rgba(27,79,168,.95)');lg.addColorStop(1,'rgba(37,99,212,.95)');
-  ctx.strokeStyle=lg;ctx.lineWidth=3;ctx.lineJoin='round';ctx.lineCap='round';
-  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-  for(let i=1;i<pts.length;i++){
-    const mx=(pts[i-1].x+pts[i].x)/2;
-    ctx.bezierCurveTo(mx,pts[i-1].y,mx,pts[i].y,pts[i].x,pts[i].y);
+    // Smooth line
+    ctx.save();ctx.shadowColor='rgba(27,79,168,.5)';ctx.shadowBlur=6;
+    const lg=ctx.createLinearGradient(padL,0,W-padR,0);
+    lg.addColorStop(0,'rgba(58,123,255,.95)');lg.addColorStop(.5,'rgba(27,79,168,.95)');lg.addColorStop(1,'rgba(37,99,212,.95)');
+    ctx.strokeStyle=lg;ctx.lineWidth=3;ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++){
+      const mx=(pts[i-1].x+pts[i].x)/2;
+      ctx.bezierCurveTo(mx,pts[i-1].y,mx,pts[i].y,pts[i].x,pts[i].y);
+    }
+    ctx.stroke();ctx.restore();
   }
-  ctx.stroke();ctx.restore();
 
   // Glowing dots
   pts.forEach((p,i)=>{
@@ -3970,10 +4143,10 @@ function filterTeachers(){}
 //  MY STUDENTS (Teacher)
 // ════════════════════════════════════════════
 async function loadMyStudents(){
-  const mySubjects=S.subjects||{Jss1:['Mathematics']};
+  const mySubjects=S.subjects||{};
   const classes=Object.keys(mySubjects);
   const tabs=$('my-students-tabs');
-  tabs.innerHTML=classes.map((c,i)=>`<button class="tab-btn${i===0?' active':''}" onclick="loadClassStudents('${c}',this)">${c.replace('-',' ')}</button>`).join('');
+  tabs.innerHTML=classes.map((c,i)=>`<button class="tab-btn${i===0?' active':''}" onclick="loadClassStudents('${c}',this)">${c.replace('-',' ')}</button>`).join('')||'<div class="empty" style="padding:12px;"><p style="font-size:12px;color:var(--muted);">No classes assigned to you yet — contact your Knosk Admin.</p></div>';
   if(classes.length)loadClassStudents(classes[0]);
 }
 async function loadClassStudents(cls,btn){
@@ -4273,28 +4446,37 @@ async function rejectItem(id,type){
 //  ANALYTICS
 // ════════════════════════════════════════════
 async function loadAnalytics(){
-  const [students,users,spon]=await Promise.all([dbRead('Students'),dbRead('Users'),dbRead('Sponsorships')]);
+  const [students,users,spon,concerns,content,activity]=await Promise.all([
+    dbRead('Students'),dbRead('Users'),dbRead('Sponsorships'),dbRead('Concerns'),dbRead('Content'),dbRead('ActivityLog')
+  ]);
   const teachers=users.filter(u=>u.role==='teacher');
   const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const avgAttendance=avgField(students,'attendancePct');
+  const avgPerformance=avgField(students,'points');
+  const openConcerns=concerns.filter(c=>c.status==='open');
   $('analytics-stats').innerHTML=[
     {icon:'🎓',num:students.length,lbl:'Total Students',css:'sc-blue'},
     {icon:'👩‍🏫',num:teachers.length,lbl:'Teachers',css:'sc-green'},
-    {icon:'📅',num:'91%',lbl:'Avg Attendance',css:'sc-teal'},
-    {icon:'⭐',num:'79',lbl:'Avg Performance Score',css:'sc-gold'},
+    {icon:'📅',num:avgAttendance+'%',lbl:'Avg Attendance',css:'sc-teal'},
+    {icon:'⭐',num:avgPerformance,lbl:'Avg Performance Score',css:'sc-gold'},
     {icon:'❤️',num:Math.round(sponsored.length/Math.max(students.length,1)*100)+'%',lbl:'Sponsorship Rate',css:'sc-pink'},
-    {icon:'🚨',num:2,lbl:'Open Issues',css:'sc-red'},
+    {icon:'🚨',num:openConcerns.length,lbl:'Open Issues',css:'sc-red'},
   ].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
-  // Teacher activity
-  $('teacher-activity-list').innerHTML=teachers.map(t=>`
-    <div class="list-item" style="margin-bottom:6px;">
+  // Teacher activity — real upload counts (Content sheet) and real last-login (ActivityLog)
+  $('teacher-activity-list').innerHTML=teachers.map(t=>{
+    const uploads=content.filter(c=>c.uploadedBy===t.id).length;
+    const logins=activity.filter(a=>a.userId===t.id&&a.action==='LOGIN').sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+    const lastActive=logins.length?fmtDate(logins[0].timestamp):'Never logged in';
+    return `<div class="list-item" style="margin-bottom:6px;">
       <div class="li-av" style="background:linear-gradient(135deg,#059669,#10B981);">${gi(t.name)}</div>
-      <div class="li-info"><div class="li-name">${t.name}</div><div class="li-sub">Last active: Today · Uploads: 2</div></div>
-      <span class="badge b-active">Active</span>
-    </div>`).join('')||'<div class="empty"><p>No teachers yet</p></div>';
+      <div class="li-info"><div class="li-name">${t.name}</div><div class="li-sub">Last active: ${lastActive} · Uploads: ${uploads}</div></div>
+      <span class="badge ${logins.length?'b-active':'b-pending'}">${logins.length?'Active':'No logins yet'}</span>
+    </div>`;}).join('')||'<div class="empty"><p>No teachers yet</p></div>';
   // Donut
+  const attendanceTrend=weeklyAttendanceTrend(await dbRead('Attendance'));
   setTimeout(()=>{
-    drawBarChart('chart-class-perf',CLASSES.map(c=>({label:c,val:Math.floor(65+Math.random()*30)})));
-    drawLineChart('chart-att-trend');
+    drawBarChart('chart-class-perf',classAverages(students,'attendancePct').map(c=>({label:c.label,val:c.val})));
+    if(attendanceTrend) drawLineChart('chart-att-trend',attendanceTrend);
     drawDonutChart('chart-spon-donut',sponsored.length,students.length-sponsored.length);
   },200);
   $('spon-donut-legend').innerHTML=`<span class="badge b-green">✅ ${sponsored.length} Sponsored</span> <span class="badge b-red">⚠️ ${students.length-sponsored.length} Need Sponsor</span>`;
@@ -4822,23 +5004,74 @@ function loadHowTo(){
 // ════════════════════════════════════════════
 //  ADMIN USERS
 // ════════════════════════════════════════════
+let _adminUsersCache=[];
 async function loadAdminUsers(){
   const users=await dbRead('Users');
-  $('users-tbody').innerHTML=users.map((u,i)=>`<tr>
+  _adminUsersCache=users;
+  $('users-tbody').innerHTML=users.map((u,i)=>{
+    const extra=Array.isArray(u.additionalRoles)?u.additionalRoles:[];
+    return `<tr>
     <td>${i+1}</td>
     <td><div style="display:flex;align-items:center;gap:8px;"><div style="width:30px;height:30px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:white;">${gi(u.name)}</div><strong>${u.name}</strong></div></td>
     <td style="font-size:12px;color:var(--muted);">${u.email}</td>
-    <td><span class="badge b-blue">${ROLES[u.role]?.label||u.role}</span></td>
+    <td>
+      <span class="badge b-blue">${ROLES[u.role]?.label||u.role}</span>
+      ${extra.map(r=>`<span class="badge b-blue" style="opacity:.65;margin-left:4px;">+${ROLES[r]?.label||r}</span>`).join('')}
+    </td>
     <td><span class="badge ${u.status==='active'?'b-active':'b-pending'}">${u.status||'pending'}</span></td>
     <td style="font-size:12px;color:var(--muted);">${fmtDate(u.joinedAt)}</td>
-    <td><div style="display:flex;gap:5px;">
+    <td><div style="display:flex;gap:5px;flex-wrap:wrap;">
       ${u.status==='pending'?`<button class="btn btn-xs btn-green" onclick="approveUser('${u.id}')">✓</button>`:''}
+      <button class="btn btn-xs btn-ghost" onclick="openEditRoleModal('${u.id}')">Edit Role</button>
       ${u.role!=='admin'?`<button class="btn btn-xs btn-red" onclick="delUser('${u.id}','${u.name}')">Del</button>`:''}
     </div></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
 }
 async function approveUser(id){await dbUpdate('Users',id,{status:'active'});loadAdminUsers();toast('✅ User approved');}
 async function delUser(id,name){if(!confirm(`Delete "${name}"?`))return;await safePost({action:'deleteUser',userId:id});loadAdminUsers();}
+
+// ── Edit Role / Access Level (System Administrator & Knosk Admin only) ──
+let _editRoleUserId=null;
+function openEditRoleModal(id){
+  const u=_adminUsersCache.find(x=>x.id===id);
+  if(!u){toast('User not found','warn');return;}
+  _editRoleUserId=id;
+  $('er-sub').textContent=`${u.name} · ${u.email}`;
+  const sel=$('er-primary-role');
+  sel.innerHTML=Object.entries(ROLES).map(([k,r])=>`<option value="${k}" ${k===u.role?'selected':''}>${r.icon} ${r.label}</option>`).join('');
+  const extra=Array.isArray(u.additionalRoles)?u.additionalRoles:[];
+  $('er-extra-roles').innerHTML=Object.entries(ROLES).map(([k,r])=>`
+    <span class="role-chip${extra.includes(k)?' selected':''}" data-role="${k}" onclick="toggleRoleChip(this)">${r.icon} ${r.label}</span>
+  `).join('');
+  $('edit-role-msg').innerHTML='';
+  openModal('modal-edit-role');
+}
+function toggleRoleChip(el){el.classList.toggle('selected');}
+async function saveUserRole(){
+  if(!_editRoleUserId)return;
+  const newRole=$('er-primary-role').value;
+  const extraRoles=Array.from(document.querySelectorAll('#er-extra-roles .role-chip.selected'))
+    .map(el=>el.dataset.role).filter(r=>r!==newRole);
+  const msg=$('edit-role-msg');
+  const u=_adminUsersCache.find(x=>x.id===_editRoleUserId);
+  const result=await dbUpdate('Users',_editRoleUserId,{role:newRole,additionalRoles:extraRoles});
+  if(!result?.success){
+    msg.innerHTML=`<div class="alert al-err">${result?.error||'Could not update access level.'}</div>`;
+    return;
+  }
+  if(u){
+    dbWrite('Notifications',{
+      id:uid(),userId:_editRoleUserId,
+      title:'🔄 Your Access Level Was Updated',
+      body:`Your role is now ${ROLES[newRole]?.label||newRole}${extraRoles.length?' (+ '+extraRoles.map(r=>ROLES[r]?.label||r).join(', ')+')':''}. Log out and back in to see the change.`,
+      icon:'🔄',read:false,createdAt:new Date().toISOString()
+    });
+  }
+  msg.innerHTML='<div class="alert al-ok">✅ Access level updated!</div>';
+  toast('✅ User access level updated');
+  setTimeout(()=>{closeModal('modal-edit-role');loadAdminUsers();},1200);
+}
+
 async function adminAddUser(){
   const name=$('au-name').value.trim();const email=$('au-email').value.trim().toLowerCase();
   const pass=$('au-pass').value;const role=$('au-role').value;const phone=$('au-phone').value.trim();
@@ -5585,18 +5818,23 @@ async function loadCFStaff(){
   const users=await dbRead('Users');
   const concerns=await dbRead('Concerns');
   const content=await dbRead('Content');
-  renderCFStaffTab('overview',users,concerns,content);
+  const activity=await dbRead('ActivityLog');
+  renderCFStaffTab('overview',users,concerns,content,activity);
 }
 
-function renderCFStaffTab(tab,users,concerns,content){
+function renderCFStaffTab(tab,users,concerns,content,activity){
   const el=$('cf-staff-content');
   if(tab==='overview'){
     const staffRoles=['teacher','knosk_admin','child_sponsorship','knosk_programs','cofounder'];
     const staff=users.filter(u=>staffRoles.includes(u.role));
+    const lastLoginOf=(userId)=>{
+      const logins=activity.filter(a=>a.userId===userId&&a.action==='LOGIN').sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+      return logins.length?fmtDate(logins[0].timestamp):'Never';
+    };
     el.innerHTML=`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
         <div class="card">
-          <div class="card-header"><div class="card-title">📊 Activity Radar by Role</div><div class="live-dot">Live</div></div>
+          <div class="card-header"><div class="card-title">📊 Activity by Role</div><div class="live-dot">Live</div></div>
           <div class="card-body"><canvas id="cf-staff-radar" class="chart-canvas"></canvas></div>
         </div>
         <div class="card">
@@ -5621,7 +5859,7 @@ function renderCFStaffTab(tab,users,concerns,content){
           ${staff.map(u=>{
             const myContent=content.filter(x=>x.uploadedBy===u.id);
             const myConcerns=concerns.filter(x=>x.raisedBy===u.id&&x.status==='open');
-            const lastActive='Today';
+            const lastActive=lastLoginOf(u.id);
             return`<div class="list-item" style="margin-bottom:8px;">
               <div class="li-av" style="background:${ROLES[u.role]?.color||'var(--blue)'};">${gi(u.name)}</div>
               <div class="li-info">
@@ -5632,7 +5870,13 @@ function renderCFStaffTab(tab,users,concerns,content){
             </div>`;}).join('')}
         </div>
       </div>`;
-    setTimeout(()=>drawBarChart('cf-staff-radar',staffRoles.map(r=>({label:r.replace('_',' ').slice(0,6),val:Math.floor(Math.random()*80+20)}))),200);
+    // Real per-role average of the same action-count metric shown above —
+    // no randomness, so it always matches the Action Summary panel.
+    setTimeout(()=>drawBarChart('cf-staff-radar',staffRoles.map(r=>{
+      const inRole=staff.filter(u=>u.role===r);
+      const avgActions=inRole.length?avgOf(inRole.map(u=>content.filter(x=>x.uploadedBy===u.id).length+concerns.filter(x=>x.raisedBy===u.id).length))*10:0;
+      return {label:r.replace('_',' ').slice(0,6),val:Math.min(avgActions,100)};
+    })),200);
   } else if(tab==='child-spon'){
     const csUsers=users.filter(u=>u.role==='child_sponsorship');
     el.innerHTML=`
@@ -5678,7 +5922,7 @@ document.addEventListener('click',e=>{
   if(btn){
     const tabMap={'Overview':'overview','Child Sponsorship Actions':'child-spon','Teachers':'teachers','Programs Staff':'programs','Pending Actions 🚨':'pending'};
     const tabKey=Object.entries(tabMap).find(([k])=>btn.textContent.trim().startsWith(k.slice(0,5)))?.[1]||'overview';
-    Promise.all([dbRead('Users'),dbRead('Concerns'),dbRead('Content')]).then(([u,cn,ct])=>renderCFStaffTab(tabKey,u,cn,ct));
+    Promise.all([dbRead('Users'),dbRead('Concerns'),dbRead('Content'),dbRead('ActivityLog')]).then(([u,cn,ct,ac])=>renderCFStaffTab(tabKey,u,cn,ct,ac));
   }
 });
 
