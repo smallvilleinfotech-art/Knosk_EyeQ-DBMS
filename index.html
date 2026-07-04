@@ -2501,7 +2501,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 //  sponsor directory with track records
 // ════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6nFCYiOg5BHAq7j4jE1v1vMX4AjLM1XliGN1AI0plLlZqKjzs9SWLYTbRcYDqlNZX/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyTrBeET60hpSeO99xiiS_ae_cumxcpVJFDtKN3bhBZUC03XEqhF5uwJffmoXG5H99Z/exec';
 let S = {}; // session
 
 // ════════════════════════════════════════════
@@ -2687,12 +2687,7 @@ async function safePost(b){
     const data = await r.json();
     // If server says session expired, force re-login
     if(data && data.authError){
-      toast('Session expired. Please sign in again.','warn');
-      setTimeout(()=>{
-        sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');
-        _sessionToken=null;_sessionUserId=null;S={};
-        showPage('page-login');
-      },2000);
+      forceLogout('Session expired. Please sign in again.');
     }
     return data;
   } catch(e) {
@@ -2960,6 +2955,7 @@ async function doLogin(){
   // ⚡ Start keep-alive ping + background cache warming immediately after login
   startKeepAlive();
   warmCache(); // fire-and-forget — does not delay the welcome page
+  resetInactivityTimer();
   showWelcomePage();
 }
 
@@ -4356,6 +4352,9 @@ async function submitContent(){
   if(!title||!content){msg.innerHTML='<div class="alert al-err">Title and content are required.</div>';return;}
   const row={id:uid(),subject,class:cls,type,title,content,link,uploadedBy:S.id,uploadedByName:S.name,status:'pending',createdAt:new Date().toISOString()};
   await dbWrite('Content',row);
+  notifyRoles(['knosk_admin','cofounder'],{
+    title:'📚 New Content Pending Approval',body:`"${title}" (${subject}, ${cls}) uploaded by ${S.name}.`,icon:'📚'
+  },S.id);
   msg.innerHTML='<div class="alert al-ok">✅ Uploaded! Pending Knosk Admin approval.</div>';
   setTimeout(()=>msg.innerHTML='',3000);
 }
@@ -4370,6 +4369,9 @@ async function submitConcern(){
   if(!title||!detail){msg.innerHTML='<div class="alert al-err">Title and details are required.</div>';return;}
   const row={id:uid(),category:cat,priority:pri,title,detail,raisedBy:S.id,raisedByName:S.name,role:S.role,status:'open',createdAt:new Date().toISOString()};
   await dbWrite('Concerns',row);
+  notifyRoles(['admin','cofounder','knosk_admin'],{
+    title:`🚨 ${pri.toUpperCase()} Priority Concern: ${title}`,body:`Raised by ${S.name} (${ROLES[S.role]?.label||S.role}) — Category: ${cat}.`,icon:'🚨'
+  },S.id);
   msg.innerHTML='<div class="alert al-ok">🚨 Concern submitted! Knosk Admin and Co-founders have been notified.</div>';
   toast('🚨 Concern escalated to management');
   setTimeout(()=>{msg.innerHTML='';$('cc-title').value='';$('cc-detail').value='';},3000);
@@ -4730,6 +4732,9 @@ async function createProgram(){
   const msg=$('create-prog-msg');
   if(!name){msg.innerHTML='<div class="alert al-err">Program name required.</div>';return;}
   await dbWrite('Programs',{id:uid(),name,category:cat,description:desc,startDate:start,target,status:'pending',participants:0,engagement:0,createdBy:S.id,createdByName:S.name,createdAt:new Date().toISOString()});
+  notifyRoles(['knosk_admin','cofounder'],{
+    title:'🎯 New Program Pending Approval',body:`"${name}" was submitted by ${S.name} and needs review.`,icon:'🎯'
+  },S.id);
   msg.innerHTML='<div class="alert al-ok">✅ Program created! Pending Knosk Admin approval.</div>';
   setTimeout(()=>{closeModal('modal-create-prog');loadPrograms();},1500);
 }
@@ -4778,6 +4783,9 @@ async function sendMsg(){
   if(!txt||!_chatTarget)return;
   const row={id:uid(),senderId:S.id,senderName:S.name,senderRole:S.role,recipientId:_chatTarget.id,recipientName:_chatTarget.name,text:txt,sentAt:new Date().toISOString(),read:false};
   await dbWrite('Messages',row);
+  notifyUserIds([_chatTarget.id],{
+    title:`💬 New message from ${S.name}`,body:txt.length>60?txt.slice(0,60)+'...':txt,icon:'💬'
+  });
   $('chat-input').value='';
   fetchMessages();
 }
@@ -5023,12 +5031,18 @@ async function loadAdminUsers(){
     <td><div style="display:flex;gap:5px;flex-wrap:wrap;">
       ${u.status==='pending'?`<button class="btn btn-xs btn-green" onclick="approveUser('${u.id}')">✓</button>`:''}
       <button class="btn btn-xs btn-ghost" onclick="openEditRoleModal('${u.id}')">Edit Role</button>
-      ${u.role!=='admin'?`<button class="btn btn-xs btn-red" onclick="delUser('${u.id}','${u.name}')">Del</button>`:''}
+      ${u.role!=='admin'?`<button class="btn btn-xs btn-red" onclick="delUser('${u.id}','${u.name}')">Deactivate</button>`:''}
     </div></td>
   </tr>`;}).join('');
 }
 async function approveUser(id){await dbUpdate('Users',id,{status:'active'});loadAdminUsers();toast('✅ User approved');}
-async function delUser(id,name){if(!confirm(`Delete "${name}"?`))return;await safePost({action:'deleteUser',userId:id});loadAdminUsers();}
+async function delUser(id,name){
+  if(!confirm(`Deactivate "${name}"? They will no longer be able to log in, but their records are kept.`))return;
+  const result=await safePost({action:'deleteUser',userId:id});
+  if(!result?.success){ toast(result?.error||'Could not deactivate user.','warn'); return; }
+  toast('✅ User deactivated');
+  loadAdminUsers();
+}
 
 // ── Edit Role / Access Level (System Administrator & Knosk Admin only) ──
 let _editRoleUserId=null;
@@ -5097,6 +5111,9 @@ async function addStudent(){
   const img=$('as-img').value.trim();const msg=$('add-student-msg');
   if(!name){msg.innerHTML='<div class="alert al-err">Name required.</div>';return;}
   await dbWrite('Students',{id:uid(),name,gender,class:cls,dateOfAdmission:doa,parentName:parent,parentPhone:pphone,imageUrl:img,status:'active',points:0,attendancePct:0,createdAt:new Date().toISOString()});
+  notifyRoles(['admin','cofounder','knosk_admin','child_sponsorship'],{
+    title:'🎓 New Student Enrolled',body:`${name} (${cls}) was added by ${S.name}.`,icon:'🎓'
+  },S.id);
   msg.innerHTML='<div class="alert al-ok">✅ Student added!</div>';
   setTimeout(()=>{closeModal('modal-add-student');loadStudentsView();},1200);
 }
@@ -5121,6 +5138,12 @@ async function assignSponsor(){
   const endDate=$('sp-end')?.value||'';
   const inviteMethod=$('sp-invite')?.value||'';
   await dbWrite('Sponsorships',{id:uid(),studentId,studentName:st.name||'—',sponsorId,sponsorName:sp.name||'—',startDate:start,endDate,amount,notes,status:spStatus,sponsorshipType:spType,inviteMethod,term:'1st Term',session:'2025/2026',createdAt:new Date().toISOString()});
+  notifyRoles(['admin','cofounder','child_sponsorship'],{
+    title:'❤️ New Sponsorship Assigned',body:`${sp.name||'A sponsor'} is now sponsoring ${st.name||'a student'} (₦${Number(amount||0).toLocaleString()}).`,icon:'❤️'
+  },S.id);
+  if(sponsorId) notifyUserIds([sponsorId],{
+    title:'🎉 You Have a New Sponsored Student',body:`You are now sponsoring ${st.name||'a student'}. Thank you for your support!`,icon:'🎉'
+  });
   msg.innerHTML='<div class="alert al-ok">✅ Sponsor assigned!</div>';
   setTimeout(()=>{closeModal('modal-assign-sponsor');loadSponsorship();},1400);
 }
@@ -5226,39 +5249,44 @@ async function postAnnouncement(adminOverride=false){
 // ════════════════════════════════════════════
 let _notifs=[];
 let _notifPoll=null;
-let _knownNotifIds=new Set();
-let _notifFirstLoad=true;
 
-// Create a Notification row for every active user in the given roles.
-// Used for authenticated flows (e.g. admin adding a user). For the public
-// registration flow, notifications are created server-side instead, since
-// an unauthenticated visitor has no session to write with.
+// Alert a set of roles (and/or specific user ids) about something that
+// just happened. Fans out server-side in one request — reliable even
+// if the person triggering it isn't looking at their own dashboard,
+// and works regardless of who else is currently online.
 async function notifyRoles(roles, {title, body, icon}, excludeUserId){
   try{
-    const users = await dbRead('Users');
-    const targets = users.filter(u => roles.includes(u.role) && u.status==='active' && u.id!==excludeUserId);
-    for(const u of targets){
-      await dbWrite('Notifications', {
-        id: uid(), userId: u.id, title, body, icon: icon||'🔔',
-        read: false, createdAt: new Date().toISOString()
-      });
-    }
+    await safePost({action:'notify', roles, title, body, icon: icon||'🔔'});
   }catch(e){ console.warn('notifyRoles failed', e); }
 }
+async function notifyUserIds(userIds, {title, body, icon}){
+  try{
+    await safePost({action:'notify', userIds, title, body, icon: icon||'🔔'});
+  }catch(e){ console.warn('notifyUserIds failed', e); }
+}
+
+// Persistent "last seen notification time" per user, stored in
+// localStorage so it survives logins/reloads on this browser. This is
+// what makes the sound alert reliable: it no longer depends on the
+// in-memory session state (which reset every login and could suppress
+// a genuinely new notification's sound if the admin had just logged
+// back in when it arrived).
+function _notifWatermarkKey(){ return 'knosk_notif_lastseen_'+(S.id||'anon'); }
+function getNotifWatermark(){ return localStorage.getItem(_notifWatermarkKey()) || '1970-01-01T00:00:00.000Z'; }
+function setNotifWatermark(iso){ if(iso) localStorage.setItem(_notifWatermarkKey(), iso); }
 
 async function loadNotifications(){
   _notifs=await dbRead('Notifications');
   const mine=_notifs.filter(n=>n.userId===S.id);
   const unread=mine.filter(n=>!n.read).length;
 
-  // Detect notifications that are new since the last check (not just first load)
-  // and play the alert sound for them — this is what makes the badge feel "live".
-  if(!_notifFirstLoad){
-    const freshUnread = mine.filter(n=>!n.read && !_knownNotifIds.has(n.id));
-    if(freshUnread.length) playNotifSound();
-  }
-  _notifFirstLoad=false;
-  mine.forEach(n=>_knownNotifIds.add(n.id));
+  // Anything created after our last-seen watermark is genuinely new —
+  // play the loud alert sound for it, then move the watermark forward.
+  const watermark=getNotifWatermark();
+  const freshOnes=mine.filter(n=>n.createdAt && n.createdAt>watermark);
+  if(freshOnes.length) playNotifSound();
+  const newestTs=mine.reduce((max,n)=>(n.createdAt&&n.createdAt>max)?n.createdAt:max, watermark);
+  setNotifWatermark(newestTs);
 
   const badge=$('notif-badge');
   if(badge){badge.textContent=unread;badge.classList.toggle('show',unread>0);}
@@ -6005,6 +6033,9 @@ async function createSponsorAccount(){
     });
   }
   msg.innerHTML=`<div class="alert al-ok">✅ Sponsor account created! ${selectedStudents.length} student(s) assigned. Temp password: <strong>${tempPass}</strong></div>`;
+  notifyRoles(['admin','cofounder','child_sponsorship'],{
+    title:'🤝 New Sponsor Onboarded',body:`${name} was created and assigned ${selectedStudents.length} student(s) by ${S.name}.`,icon:'🤝'
+  },S.id);
   toast('🤝 Sponsor account created with '+selectedStudents.length+' student(s) assigned');
   setTimeout(()=>{closeModal('modal-new-sponsor');loadSponsorship();},2000);
 }
@@ -6335,6 +6366,9 @@ async function recordPayment(){
   const sp=users.find(u=>u.id===sponsorId)||{name:'—'};
   const row={id:uid(),type,studentId,studentName:st.name,sponsorId,sponsorName:sp.name,amount:Number(amount),term:$('pay-term')?.value||'1st Term',session:$('pay-session')?.value||'2025/2026',paymentDate:$('pay-date')?.value||today(),reference:$('pay-ref')?.value.trim()||'',notes:$('pay-notes')?.value.trim()||'',status:'paid',confirmedBy:S.name,createdAt:new Date().toISOString()};
   await dbWrite('Payments',row);
+  notifyRoles(['admin','cofounder','child_sponsorship'],{
+    title:'💰 Payment Recorded',body:`₦${Number(amount).toLocaleString()} ${type||'payment'} for ${st.name} logged by ${S.name}.`,icon:'💰'
+  },S.id);
   msg.innerHTML='<div class="alert al-ok">✅ Payment recorded successfully!</div>';
   _invalidate('Payments');
   setTimeout(()=>{closeModal('modal-record-payment');loadPayments();},1500);
@@ -6354,21 +6388,57 @@ async function sendPaymentNotification(){
 
 function doLogout(){
   if(confirm('Sign out of Knosk EyeQ?')){
-    // Revoke token on server (fire-and-forget — no need to await)
     if(_sessionToken){
       fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({action:'logout',token:_sessionToken,userId:_sessionUserId})
       }).catch(()=>{});
     }
-    sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');sessionStorage.removeItem('knosk_u');
-    _sessionToken=null;_sessionUserId=null;S={};
-    if(_chatPoll)clearInterval(_chatPoll);
-    if(_slidePoll)clearInterval(_slidePoll);
-    stopNotifPolling();
-    _notifFirstLoad=true;_knownNotifIds=new Set();
+    cleanupSession();
     showPage('page-login');
   }
 }
+
+// Shared cleanup used by manual logout, inactivity timeout, and
+// server-reported session expiry — keeps all three in perfect sync.
+function cleanupSession(){
+  sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');sessionStorage.removeItem('knosk_u');
+  _sessionToken=null;_sessionUserId=null;S={};
+  if(_chatPoll)clearInterval(_chatPoll);
+  if(_slidePoll)clearInterval(_slidePoll);
+  stopNotifPolling();
+  clearTimeout(_inactivityTimer);
+}
+
+// Server said the session is no longer valid (expired or logged in
+// elsewhere) — clean up and bounce to the login page.
+function forceLogout(message){
+  toast(message,'warn');
+  setTimeout(()=>{ cleanupSession(); showPage('page-login'); },1500);
+}
+
+// ── 15-MINUTE INACTIVITY TIMEOUT ──────────────────────────────
+// This is the ONLY thing (besides logging in elsewhere, which the
+// backend already handles by invalidating the old token) that should
+// end a session. It's driven purely by real user interaction —
+// mouse movement, clicks, keystrokes, touches, scrolling — NOT by
+// background polling (notifications, keepalive pings), so leaving
+// the tab open and idle for 15 minutes reliably logs you out even
+// though those background timers keep running.
+const INACTIVITY_LIMIT_MS = 15*60*1000;
+let _inactivityTimer=null;
+function resetInactivityTimer(){
+  if(!_sessionToken) return; // not logged in — nothing to time out
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer=setTimeout(()=>{
+    cleanupSession();
+    showPage('page-login');
+    toast('You were signed out after 15 minutes of inactivity.','warn');
+  }, INACTIVITY_LIMIT_MS);
+}
+['mousemove','mousedown','keydown','touchstart','scroll'].forEach(evt=>{
+  document.addEventListener(evt, resetInactivityTimer, {passive:true});
+});
+
 window.addEventListener('load',()=>{
   updateSoundToggleUI();
   const saved=sessionStorage.getItem('knosk_s');
@@ -6376,7 +6446,7 @@ window.addEventListener('load',()=>{
   const savedUserId=sessionStorage.getItem('knosk_u');
   if(savedToken){ _sessionToken=savedToken; _sessionUserId=savedUserId; }
   // ⚡ Restore keep-alive and warm cache on page reload
-  if(savedToken){ startKeepAlive(); warmCache(); }
+  if(savedToken){ startKeepAlive(); warmCache(); resetInactivityTimer(); }
   if(saved){try{const u=JSON.parse(saved);if(u?.id){S=u;if(S.activeRole)selectRole(S.activeRole);else showWelcomePage();}}catch(e){}}
   document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 });
