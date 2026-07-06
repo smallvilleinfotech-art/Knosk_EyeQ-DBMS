@@ -2501,7 +2501,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 //  sponsor directory with track records
 // ════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzrLau6UyBr5vJj4IB0yBkor8vHbItDMV0wE8Z48U6rMy2FEM5_g6g6MdIiAgJjFUeD/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/library/d/1fbPMAODA4ysz9X-vQW6T7Nu9cGp_iPyBfI7pBALk8MiAX07NJSwZbsd9/14';
 let S = {}; // session
 
 // ════════════════════════════════════════════
@@ -2670,9 +2670,15 @@ let _sessionToken = null;
 let _sessionUserId = null;
 
 async function safePost(b){
-  // Always attach token + userId — backend validates on every request
+  // Always attach token + our OWN identity for auth validation.
+  // IMPORTANT: this must NOT be named 'userId' — several actions
+  // (like deleteUser) already have their own 'userId' field meaning
+  // "the target user", and Object.assign would let this overwrite
+  // that, silently turning "delete THAT user" into "delete ME".
+  // That collision is what was deleting the System Administrator's
+  // own row on every delete attempt.
   const payload = (_sessionToken && _sessionUserId)
-    ? Object.assign({}, b, {token: _sessionToken, userId: _sessionUserId})
+    ? Object.assign({}, b, {token: _sessionToken, authUserId: _sessionUserId})
     : b;
   try {
     // Use 'text/plain' Content-Type to avoid CORS preflight redirect on Google Apps Script.
