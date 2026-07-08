@@ -362,6 +362,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .btn-green{background:linear-gradient(135deg,#059669,#10B981);color:white;box-shadow:0 4px 14px rgba(5,150,105,.3);}
 .btn-green:hover{transform:translateY(-1px);}
 .btn-red{background:linear-gradient(135deg,#DC2626,#EF4444);color:white;box-shadow:0 4px 14px rgba(220,38,38,.3);}
+.btn-orange{background:linear-gradient(135deg,#C2410C,#F97316);color:white;box-shadow:0 4px 14px rgba(194,65,12,.3);}
 .btn-red:hover{transform:translateY(-1px);}
 .btn-ghost{background:white;border:1.5px solid var(--border);color:var(--text2);box-shadow:var(--sh-sm);}
 .btn-ghost:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-pale);}
@@ -2986,7 +2987,7 @@ function findRank(lb, studentId){
 }
 
 function fmtTime(d){if(!d)return'';try{return new Date(d).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
-function greet(){const h=new Date().getHours();return h<12?'Good morning':'h<17'?'Good afternoon':'Good evening';}
+function greet(){const h=new Date().getHours();return h<12?'Good morning':h<17?'Good afternoon':'Good evening';}
 function toast(msg,type='ok'){
   const t=document.createElement('div');
   const bg=type==='ok'?'var(--green)':type==='warn'?'var(--gold-dark)':'var(--red)';
@@ -3379,7 +3380,10 @@ async function loadMgmtDash(role){
     dbRead('Students'),dbRead('Users'),dbRead('Sponsorships'),dbRead('Concerns'),dbRead('ExerciseScores'),dbRead('Settings')
   ]);
   const teachers=users.filter(u=>u.role==='teacher');
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const activeIds=new Set(spon.filter(s=>s.status==='active').map(s=>s.studentId));
+  const pendingIds=new Set(spon.filter(s=>s.status==='pending').map(s=>s.studentId));
+  const anySponsoredIds=new Set(spon.map(s=>s.studentId));
+  const sponsored=[...activeIds];
   const openConcerns=concerns.filter(c=>c.status==='open');
   const pendingApprovals=users.filter(u=>u.status==='pending').length;
   const avgAttendance=avgField(students,'attendancePct');
@@ -3562,10 +3566,13 @@ async function loadKnoskAdminDash(){
 // ── Child Sponsorship Dashboard ──
 async function loadSponsorshipDash(){
   const [students,spon]=await Promise.all([dbRead('Students'),dbRead('Sponsorships')]);
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
-  const unsponsoredCount=students.length-sponsored.length;
-  const coveragePct=Math.round(sponsored.length/Math.max(students.length,1)*100);
-  const atRiskSponsored=students.filter(s=>sponsored.includes(s.id)&&(s.attendancePct||100)<80)[0];
+  const activeIds=new Set(spon.filter(s=>s.status==='active').map(s=>s.studentId));
+  const pendingIds=new Set(spon.filter(s=>s.status==='pending').map(s=>s.studentId));
+  const anySponsoredIds=new Set(spon.map(s=>s.studentId));
+  const sponsored=students.filter(s=>activeIds.has(s.id));
+  const unsponsoredCount=students.filter(s=>!anySponsoredIds.has(s.id)).length;
+  const coveragePct=Math.round(activeIds.size/Math.max(students.length,1)*100);
+  const atRiskSponsored=students.filter(s=>activeIds.has(s.id)&&(s.attendancePct||100)<80)[0];
   const sponsorCounts={};
   spon.filter(s=>s.status==='active').forEach(s=>{sponsorCounts[s.sponsorName]=(sponsorCounts[s.sponsorName]||0)+1;});
   const topSponsors=Object.entries(sponsorCounts).sort((a,b)=>b[1]-a[1]).slice(0,2);
@@ -3582,11 +3589,12 @@ async function loadSponsorshipDash(){
   ]);
   renderStats([
     {icon:'🎓',num:students.length,lbl:'Total Students',css:'sc-blue'},
-    {icon:'✅',num:sponsored.length,lbl:'Active Sponsorship',css:'sc-green'},
-    {icon:'⚠️',num:students.length-sponsored.length,lbl:'No Sponsor Yet',css:'sc-red'},
-    {icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Monthly Funding',css:'sc-gold'},
+    {icon:'✅',num:activeIds.size,lbl:'Active Sponsorship',css:'sc-green'},
+    {icon:'⏳',num:pendingIds.size,lbl:'Pending Sponsorship',css:'sc-gold'},
+    {icon:'⚠️',num:unsponsoredCount,lbl:'No Sponsor Yet',css:'sc-red'},
+    {icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Confirmed Annual Funding',css:'sc-purple'},
     {icon:'🔴',num:students.filter(s=>(s.attendancePct||100)<80).length,lbl:'At-Risk',css:'sc-orange'},
-    {icon:'🤝',num:[...new Set(spon.map(s=>s.sponsorId))].length,lbl:'Active Sponsors',css:'sc-teal'},
+    {icon:'🤝',num:[...new Set(spon.map(s=>s.sponsorId))].length,lbl:'Total Sponsors',css:'sc-teal'},
   ]);
   $('dash-widgets').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
@@ -3639,7 +3647,7 @@ async function loadSponsorshipDash(){
           </div>`;}).join('')||'<div style="padding:14px;text-align:center;color:var(--green);font-weight:600;">✅ All sponsorships are current!</div>'}
       </div>
     </div>`;
-  setTimeout(()=>drawDonutChart('dash-spon-donut',sponsored.length,students.length-sponsored.length),200);
+  setTimeout(()=>drawDonutChart('dash-spon-donut',sponsored.length,students.filter(s=>!anySponsoredIds.has(s.id)).length,pendingIds.size),200);
 }
 
 // ── Programs Dashboard ──
@@ -3666,10 +3674,10 @@ async function loadTeacherDash(){
   const mySubjects=S.subjects||{};
   const myClasses=Object.keys(mySubjects);
   const myStudents=students.filter(s=>myClasses.includes(s.class)||(s.class&&myClasses.some(c=>c.startsWith(s.class))));
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const anySponsoredIds=new Set(spon.map(s=>s.studentId));
   const myStudentIds=myStudents.map(s=>s.id);
   const myTopScore=[...lbAll].filter(s=>myStudentIds.includes(s.userId)||myClasses.includes(s.class)).sort((a,b)=>(b.total||0)-(a.total||0))[0];
-  const unsponsoredMine=myStudents.filter(s=>!sponsored.includes(s.id));
+  const unsponsoredMine=myStudents.filter(s=>!anySponsoredIds.has(s.id));
   const nextMeeting=[...meetings].filter(m=>new Date(m.datetime)>=new Date()).sort((a,b)=>new Date(a.datetime)-new Date(b.datetime))[0];
   const classAttendance=avgField(myStudents,'attendancePct');
 
@@ -3786,7 +3794,7 @@ async function loadSponsorDash(){
   const spotlightRank=spotlight?.student?findRank(lb,spotlight.student.id):null;
 
   buildSlideshow([
-    {type:'🤝 YOUR IMPACT',title:'Thank You for Supporting These Children',body:'Your monthly contribution is directly funding education for students who would otherwise have no access. You are changing lives.',theme:'slide-theme-gold'},
+    {type:'🤝 YOUR IMPACT',title:'Thank You for Supporting These Children',body:'Your contribution is directly funding education for students who would otherwise have no access. You are changing lives.',theme:'slide-theme-gold'},
     spotlight?.student
       ? {type:'📊 STUDENT PROGRESS',title:`${spotlight.studentName} — Latest Update`,body:`Score: ${spotlight.student.points||0} points. Attendance: ${spotlight.student.attendancePct||0}%.${spotlightRank?` Rank: #${spotlightRank}.`:''} Thank you for your continued support!`,theme:'slide-theme-blue'}
       : {type:'📊 STUDENT PROGRESS',title:'No Sponsored Students Yet',body:'Once you sponsor a student, their progress updates will appear here.',theme:'slide-theme-blue'},
@@ -3794,7 +3802,7 @@ async function loadSponsorDash(){
   ]);
   renderStats([
     {icon:'🤝',num:mine.length,lbl:'Students I Support',css:'sc-blue'},
-    {icon:'💰',num:'₦'+mine.reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Monthly Giving',css:'sc-gold'},
+    {icon:'💰',num:'₦'+mine.reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Total Annual Giving',css:'sc-gold'},
     {icon:'📊',num:mineWithStudent.some(m=>m.student)?avgPerformance:'—',lbl:'Avg Performance',css:'sc-green'},
     {icon:'📅',num:mineWithStudent.some(m=>m.student)?avgAttendance+'%':'—',lbl:'Avg Attendance',css:'sc-teal'},
   ]);
@@ -3805,7 +3813,7 @@ async function loadSponsorDash(){
     <div style="background:white;border-radius:var(--r);border:1px solid var(--border2);box-shadow:var(--sh-card);overflow:hidden;margin-bottom:14px;">
       <div style="background:var(--g-gold);padding:18px 20px;display:flex;align-items:center;gap:14px;">
         <div style="width:52px;height:52px;border-radius:50%;border:3px solid rgba(255,255,255,.3);background:var(--g-navy);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:white;">${gi(s.studentName||'S')}</div>
-        <div><div style="font-size:16px;font-weight:800;color:white;">${s.studentName}</div><div style="font-size:11px;color:rgba(255,255,255,.8);">Sponsored since ${fmtDate(s.startDate)} · ₦${Number(s.amount||0).toLocaleString()}/month</div></div>
+        <div><div style="font-size:16px;font-weight:800;color:white;">${s.studentName}</div><div style="font-size:11px;color:rgba(255,255,255,.8);">Sponsored since ${fmtDate(s.startDate)} · ₦${Number(s.amount||0).toLocaleString()}/year${s.frequency?' · paid '+s.frequency:''}</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--border2);">
         <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--blue);">${st?.points??'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Avg Score</div></div>
@@ -3972,17 +3980,19 @@ function drawLineChart(canvasId, trend){
     ctx.fillText(w,padL+i*stepX,H-6);
   });
 }
-function drawDonutChart(canvasId,sponsored,unsponsored){
+function drawDonutChart(canvasId,sponsored,unsponsored,pending){
+  pending=pending||0;
   const c=document.getElementById(canvasId);if(!c)return;
   const ctx=c.getContext('2d');
   const dpr=window.devicePixelRatio||1;
   const sz=160;c.width=sz*dpr;c.height=sz*dpr;c.style.width=sz+'px';c.style.height=sz+'px';
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,sz,sz);
-  const total=sponsored+unsponsored||1;
+  const total=sponsored+unsponsored+pending||1;
   const cx=sz/2,cy=sz/2,r=65,ir=42,gapAngle=0.04;
   const segs=[
     {val:sponsored,  colors:['#34D399','#059669'], shadow:'rgba(5,150,105,.5)'},
+    {val:pending,    colors:['#FCD34D','#D97706'], shadow:'rgba(217,119,6,.45)'},
     {val:unsponsored,colors:['#F87171','#DC2626'], shadow:'rgba(220,38,38,.45)'},
   ];
   let start=-Math.PI/2;
@@ -4078,6 +4088,7 @@ async function loadStudentsView(){
   _allStudents=await dbRead('Students');
   const spon=await dbRead('Sponsorships');
   const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const pendingSponsored=spon.filter(s=>s.status==='pending').map(s=>s.studentId);
   // Stat row
   $('students-stat-row').innerHTML=`
     <div class="stat-card"><div class="sc-icon sc-blue">🎓</div><div class="sc-info"><div class="sc-num">${_allStudents.length}</div><div class="sc-label">Total</div></div></div>
@@ -4085,12 +4096,13 @@ async function loadStudentsView(){
     <div class="stat-card"><div class="sc-icon sc-gold">⏳</div><div class="sc-info"><div class="sc-num">${_allStudents.filter(s=>s.status==='pending').length}</div><div class="sc-label">Pending</div></div></div>
     <div class="stat-card"><div class="sc-icon sc-red">⚠️</div><div class="sc-info"><div class="sc-num">${_allStudents.filter(s=>(s.attendancePct||100)<80).length}</div><div class="sc-label">At-Risk</div></div></div>
   `;
-  renderStudentsTable(_allStudents,sponsored);
+  renderStudentsTable(_allStudents,sponsored,pendingSponsored);
 }
-function renderStudentsTable(students,sponsored){
+function renderStudentsTable(students,sponsored,pendingSponsored){
   const role=S.activeRole||S.role;
   $('students-tbody').innerHTML=students.map((s,i)=>{
     const sp=sponsored&&sponsored.includes(s.id);
+    const spPending=!sp&&pendingSponsored&&pendingSponsored.includes(s.id);
     return`<tr>
       <td>${i+1}</td>
       <td><div style="display:flex;align-items:center;gap:8px;"><div style="width:32px;height:32px;border-radius:50%;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:white;flex-shrink:0;">${gi(s.name||'S')}</div><div><div style="font-weight:700;font-size:13px;">${s.name||'—'}</div></div></div></td>
@@ -4099,7 +4111,7 @@ function renderStudentsTable(students,sponsored){
       <td>${s.gender==='M'?'♂ Male':'♀ Female'}</td>
       <td><div class="prog-bar-bg" style="width:80px;display:inline-block;"><div class="prog-bar pb-${(s.attendancePct||0)>=80?'green':'red'}" style="width:${s.attendancePct||0}%;"></div></div> ${s.attendancePct||0}%</td>
       <td style="font-weight:700;">${s.points||0}pts</td>
-      <td><span class="badge ${s.status==='active'?'b-active':'b-pending'}">${s.status||'pending'}</span>${sp?' <span class="badge b-sponsored">❤️</span>':''}</td>
+      <td><span class="badge ${s.status==='active'?'b-active':'b-pending'}">${s.status||'pending'}</span>${sp?' <span class="badge b-sponsored" title="Active sponsorship">❤️</span>':spPending?' <span class="badge b-gold" title="Sponsorship pending approval">⏳❤️</span>':''}</td>
       <td><div style="display:flex;gap:5px;">
         ${s.status==='pending'&&['admin','knosk_admin','teacher'].includes(role)?`
           <button class="btn btn-xs btn-outline-blue" onclick="editStudentBeforeApprove('${s.id}')" title="Edit details then approve">✏️ Edit</button>
@@ -4144,15 +4156,20 @@ function openEnrollModal(studentId,name){
 async function loadStudentsForSponsorship(){
   _allStudents=await dbRead('Students');
   const spon=await dbRead('Sponsorships');
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const activeIds=new Set(spon.filter(s=>s.status==='active').map(s=>s.studentId));
+  const pendingIds=new Set(spon.filter(s=>s.status==='pending').map(s=>s.studentId));
+  const anySponsoredIds=new Set(spon.map(s=>s.studentId));
+  const noSponsorCount=_allStudents.filter(s=>!anySponsoredIds.has(s.id)).length;
   $('students-stat-row').innerHTML=[
     {icon:'🎓',num:_allStudents.length,lbl:'Total Students',css:'sc-blue'},
-    {icon:'✅',num:sponsored.length,lbl:'Active Sponsorship',css:'sc-green'},
-    {icon:'⚠️',num:_allStudents.length-sponsored.length,lbl:'No Sponsor',css:'sc-red'},
+    {icon:'✅',num:activeIds.size,lbl:'Active Sponsorship',css:'sc-green'},
+    {icon:'⏳',num:pendingIds.size,lbl:'Pending Sponsorship',css:'sc-gold'},
+    {icon:'⚠️',num:noSponsorCount,lbl:'No Sponsor',css:'sc-red'},
     {icon:'🔴',num:spon.filter(s=>s.endDate&&getRenewalDays(s)<0).length,lbl:'Needs Renewal',css:'sc-orange'},
   ].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
   $('students-tbody').innerHTML=_allStudents.map((s,i)=>{
-    const sp=spon.find(x=>x.studentId===s.id&&x.status==='active');
+    const studentSpon=spon.filter(x=>x.studentId===s.id);
+    const sp=studentSpon.find(x=>x.status==='active')||studentSpon[0];
     const st=getSponsorshipStatus(sp);
     const days=sp?getRenewalDays(sp):null;
     return`<tr>
@@ -4161,7 +4178,7 @@ async function loadStudentsForSponsorship(){
       <td><span class="badge b-blue">${s.class||'—'}</span></td>
       <td><span class="badge ${st.cls}">${st.label}</span></td>
       <td>${sp?sp.sponsorName:'—'}</td>
-      <td>₦${sp?Number(sp.amount||0).toLocaleString():'—'}</td>
+      <td>₦${sp?Number(sp.amount||0).toLocaleString()+'/yr':'—'}</td>
       <td>${days!==null?(days<0?`<span style="color:var(--red);font-weight:700;">Expired ${Math.abs(days)}d ago</span>`:`${days}d left`):'—'}</td>
       <td><div style="display:flex;gap:4px;">
         <button class="btn btn-xs btn-gold" onclick="openModal('modal-assign-sponsor')">Assign</button>
@@ -4539,7 +4556,11 @@ async function loadAnalytics(){
     dbRead('Students'),dbRead('Users'),dbRead('Sponsorships'),dbRead('Concerns'),dbRead('Content'),dbRead('ActivityLog')
   ]);
   const teachers=users.filter(u=>u.role==='teacher');
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const activeIds=new Set(spon.filter(s=>s.status==='active').map(s=>s.studentId));
+  const pendingIds=new Set(spon.filter(s=>s.status==='pending').map(s=>s.studentId));
+  const anySponsoredIds=new Set(spon.map(s=>s.studentId));
+  const sponsored=[...activeIds]; // kept for the 'Sponsorship Rate' stat below (confirmed/active only, by design)
+  const trulyUnsponsoredCount=students.filter(s=>!anySponsoredIds.has(s.id)).length;
   const avgAttendance=avgField(students,'attendancePct');
   const avgPerformance=avgField(students,'points');
   const openConcerns=concerns.filter(c=>c.status==='open');
@@ -4566,9 +4587,9 @@ async function loadAnalytics(){
   setTimeout(()=>{
     drawBarChart('chart-class-perf',classAverages(students,'attendancePct').map(c=>({label:c.label,val:c.val})));
     if(attendanceTrend) drawLineChart('chart-att-trend',attendanceTrend);
-    drawDonutChart('chart-spon-donut',sponsored.length,students.length-sponsored.length);
+    drawDonutChart('chart-spon-donut',sponsored.length,trulyUnsponsoredCount,pendingIds.size);
   },200);
-  $('spon-donut-legend').innerHTML=`<span class="badge b-green">✅ ${sponsored.length} Sponsored</span> <span class="badge b-red">⚠️ ${students.length-sponsored.length} Need Sponsor</span>`;
+  $('spon-donut-legend').innerHTML=`<span class="badge b-green">✅ ${sponsored.length} Sponsored</span> ${pendingIds.size?`<span class="badge b-gold">⏳ ${pendingIds.size} Pending</span>`:''} <span class="badge b-red">⚠️ ${trulyUnsponsoredCount} Need Sponsor</span>`;
 }
 
 // ════════════════════════════════════════════
@@ -4588,7 +4609,7 @@ async function loadSponsorship(){
     {icon:'⏳',num:pendingStudentIds.size,lbl:'Pending Sponsorship',css:'sc-gold'},
     {icon:'⚠️',num:noSponsorCount,lbl:'No Sponsor Yet',css:'sc-red'},
     {icon:'🤝',num:[...new Set(spon.map(s=>s.sponsorId))].length,lbl:'Total Sponsors',css:'sc-teal'},
-    {icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Confirmed Monthly Funding',css:'sc-purple'},
+    {icon:'💰',num:'₦'+spon.filter(s=>s.status==='active').reduce((a,s)=>a+Number(s.amount||0),0).toLocaleString(),lbl:'Confirmed Annual Funding',css:'sc-purple'},
     {icon:'🔴',num:students.filter(s=>(s.attendancePct||100)<80).length,lbl:'At-Risk',css:'sc-orange'},
   ].map(s=>`<div class="stat-card"><div class="sc-icon ${s.css}">${s.icon}</div><div class="sc-info"><div class="sc-num">${s.num}</div><div class="sc-label">${s.lbl}</div></div></div>`).join('');
   renderSponStudents(students,spon);
@@ -4676,8 +4697,8 @@ function renderSponsorDir(spon){
       </div>
       <div class="sdc-stats">
         <div class="sdc-stat"><div class="sdc-num">${sp.students.length}</div><div class="sdc-lbl">Students</div></div>
-        <div class="sdc-stat"><div class="sdc-num">₦${sp.totalAmount.toLocaleString()}</div><div class="sdc-lbl">Per Term</div></div>
-        <div class="sdc-stat"><div class="sdc-num">₦${(sp.totalAmount*3).toLocaleString()}</div><div class="sdc-lbl">Est. Per Year</div></div>
+        <div class="sdc-stat"><div class="sdc-num">₦${sp.totalAmount.toLocaleString()}</div><div class="sdc-lbl">Total Annual Commitment</div></div>
+        <div class="sdc-stat"><div class="sdc-num">₦${Math.round(sp.totalAmount/12).toLocaleString()}</div><div class="sdc-lbl">Monthly Equivalent</div></div>
         <div class="sdc-stat"><div class="sdc-num">${needsRenewal.length>0?'🔴 Renew':renewingSoon.length?'⚠️ Soon':'✅ OK'}</div><div class="sdc-lbl">Status</div></div>
       </div>
     </div>`;
@@ -4685,17 +4706,20 @@ function renderSponsorDir(spon){
 }
 
 function renderAtRisk(students,spon){
-  const sponsored=spon.filter(s=>s.status==='active').map(s=>s.studentId);
+  const activeIds=new Set(spon.filter(s=>s.status==='active').map(s=>s.studentId));
+  const pendingIds=new Set(spon.filter(s=>s.status==='pending').map(s=>s.studentId));
   const at=students.filter(s=>(s.attendancePct||100)<80||(s.points||100)<40);
-  $('spon-atrisk-list').innerHTML=at.map(s=>`
-    <div class="list-item risk-${(s.attendancePct||100)<70?'high':'med'}" style="margin-bottom:8px;">
+  $('spon-atrisk-list').innerHTML=at.map(s=>{
+    const label=activeIds.has(s.id)?'Sponsored':(pendingIds.has(s.id)?'Pending Sponsor':'No Sponsor');
+    const cls=activeIds.has(s.id)?'green':(pendingIds.has(s.id)?'gold':'red');
+    return`<div class="list-item risk-${(s.attendancePct||100)<70?'high':'med'}" style="margin-bottom:8px;">
       <div class="li-av">${gi(s.name)}</div>
       <div class="li-info">
-        <div class="li-name">${s.name} <span class="badge b-${sponsored.includes(s.id)?'green':'red'}">${sponsored.includes(s.id)?'Sponsored':'No Sponsor'}</span></div>
+        <div class="li-name">${s.name} <span class="badge b-${cls}">${label}</span></div>
         <div class="li-sub">${s.class} · Att: ${s.attendancePct||0}% · Score: ${s.points||0}pts</div>
       </div>
       <span class="badge b-at-risk">⚠️ At Risk</span>
-    </div>`).join('')||'<div class="empty"><div class="empty-icon">✅</div><p>No at-risk students — great news!</p></div>';
+    </div>`;}).join('')||'<div class="empty"><div class="empty-icon">✅</div><p>No at-risk students — great news!</p></div>';
 }
 function switchSponTab(tab,el){
   _currentSponTab=tab;
@@ -4779,7 +4803,8 @@ async function viewSponsorDetail(sponsorId){
   const students=await dbRead('Students');
   const theirSpon=spon.filter(s=>s.sponsorId===sponsorId);
   const sponsorUser=users.find(u=>u.id===sponsorId)||{name:theirSpon[0]?.sponsorName||'—',email:'—'};
-  const totalMonthly=theirSpon.reduce((a,s)=>a+Number(s.amount||0),0);
+  const totalAnnual=theirSpon.reduce((a,s)=>a+Number(s.amount||0),0);
+  const monthlyEquivalent=Math.round(totalAnnual/12);
   const html=`
     <div class="sponsor-detail-card">
       <div class="sdc-header">
@@ -4792,8 +4817,8 @@ async function viewSponsorDetail(sponsorId){
       </div>
       <div class="sdc-stats">
         <div class="sdc-stat"><div class="sdc-num">${theirSpon.length}</div><div class="sdc-lbl">Students Sponsored</div></div>
-        <div class="sdc-stat"><div class="sdc-num">₦${totalMonthly.toLocaleString()}</div><div class="sdc-lbl">Monthly Contribution</div></div>
-        <div class="sdc-stat"><div class="sdc-num">₦${(totalMonthly*12).toLocaleString()}</div><div class="sdc-lbl">Annual Est.</div></div>
+        <div class="sdc-stat"><div class="sdc-num">₦${totalAnnual.toLocaleString()}</div><div class="sdc-lbl">Total Annual Commitment</div></div>
+        <div class="sdc-stat"><div class="sdc-num">₦${monthlyEquivalent.toLocaleString()}</div><div class="sdc-lbl">Monthly Equivalent</div></div>
         <div class="sdc-stat"><div class="sdc-num">${fmtDate(theirSpon[0]?.startDate)||'—'}</div><div class="sdc-lbl">First Sponsorship</div></div>
       </div>
     </div>
@@ -5012,17 +5037,20 @@ async function loadMySponsored(){
   const spon=await dbRead('Sponsorships');
   const mine=spon.filter(s=>s.sponsorId===S.id);
   const students=await dbRead('Students');
+  const lbAll=await dbRead('ExerciseScores');
   $('my-sponsored-list').innerHTML=mine.map(sp=>{
     const st=students.find(s=>s.id===sp.studentId)||{};
+    const classmates=[...lbAll].filter(x=>students.find(s=>(s.id===x.userId||s.id===x.studentId)&&s.class===st.class)).sort((a,b)=>(b.total||b.score||0)-(a.total||a.score||0));
+    const rank=st.id?findRank(classmates,st.id):null;
     return`<div style="background:white;border-radius:var(--r);border:1px solid var(--border2);box-shadow:var(--sh-card);overflow:hidden;margin-bottom:14px;">
       <div style="background:var(--g-gold);padding:18px 20px;display:flex;align-items:center;gap:14px;">
         <div style="width:52px;height:52px;border-radius:50%;border:3px solid rgba(255,255,255,.3);background:var(--g-navy);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:white;flex-shrink:0;">${gi(sp.studentName||'S')}</div>
-        <div><div style="font-size:17px;font-weight:800;color:white;">${sp.studentName}</div><div style="font-size:11px;color:rgba(255,255,255,.8);">${st.class||'—'} · Sponsored since ${fmtDate(sp.startDate)} · ₦${Number(sp.amount||0).toLocaleString()}/month</div></div>
+        <div><div style="font-size:17px;font-weight:800;color:white;">${sp.studentName}</div><div style="font-size:11px;color:rgba(255,255,255,.8);">${st.class||'—'} · Sponsored since ${fmtDate(sp.startDate)} · ₦${Number(sp.amount||0).toLocaleString()}/year</div></div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--border2);">
         <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--blue);">${st.points||sp.performanceAvg||'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Score</div></div>
         <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--green);">${st.attendancePct||0}%</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Attendance</div></div>
-        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--gold-dark);">#3</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Class Rank</div></div>
+        <div style="padding:14px;text-align:center;border-right:1px solid var(--border2);"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--gold-dark);">${rank?'#'+rank:'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Class Rank</div></div>
         <div style="padding:14px;text-align:center;"><div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--teal);">${sp.term||'—'}</div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);">Term</div></div>
       </div>
     </div>`;
@@ -5191,7 +5219,7 @@ function loadHowTo(){
     ]},
     sponsor:{title:'🤝 Sponsor — Your Impact Dashboard Guide',color:'#92400E',bg:'#FFFBF0',sections:[
       {head:'🤝 Your Sponsored Students',items:[
-        ['🤝','My Students Tab','See every student you currently sponsor. For each student: class, sponsorship start date, your monthly contribution amount, average exercise score, attendance %, and class rank.'],
+        ['🤝','My Students Tab','See every student you currently sponsor. For each student: class, sponsorship start date, your annual contribution amount, average exercise score, attendance %, and class rank.'],
         ['📊','Live Performance Data','Scores and attendance update live as teachers mark attendance and students complete exercises. You see real data — not quarterly summaries.'],
         ['🏆','Class Rank','See where each of your sponsored students ranks in their class leaderboard. Rankings are driven by exercise points — a great indicator of academic engagement.'],
         ['📅','Sponsorship Coverage','Each entry shows the term and session your sponsorship covers. When renewal approaches, the Co-founders team will reach out to you well in advance.'],
@@ -5238,7 +5266,8 @@ async function loadAdminUsers(){
       _wrap.innerHTML=`
         <button class="btn btn-sm btn-ghost" onclick="runLegacyImport()">📥 Import Sponsorship Register</button>
         <button class="btn btn-sm btn-green" onclick="runBulkApprove()">✅ Bulk-Approve All Pending</button>
-        <button class="btn btn-sm btn-red" onclick="dedupeSponsorships()">🧹 Remove Duplicate Sponsorships</button>`;
+        <button class="btn btn-sm btn-red" onclick="dedupeSponsorships()">🧹 Remove Duplicate Sponsorships</button>
+        <button class="btn btn-sm btn-orange" onclick="repairMultiChildSponsorships()">🔧 Split Multi-Child Records</button>`;
     } else {
       _wrap.innerHTML='';
     }
@@ -5470,6 +5499,93 @@ async function dedupeSponsorships(){
   }
   toast(failed?`🧹 Removed ${deleted} duplicate(s) — ${failed} failed (backend may need a 'delete' handler, see console)`:`🧹 Removed ${deleted} duplicate sponsorship record(s)`);
   if(failed)console.warn('dedupeSponsorships: some deletes failed — backend likely does not yet implement action:"delete" for the Sponsorships sheet.');
+  loadSponsorship();
+}
+
+// ════════════════════════════════════════════
+//  ONE-TIME REPAIR — split legacy "one row with N children joined
+//  together" Sponsorship records (e.g. MAX NIGERIA showing 10 real
+//  children as a single record with a comma-joined studentId) into
+//  proper one-row-per-student records. This is what the ORIGINAL
+//  bulk import produced before the per-child dedup fix — running
+//  the import again does NOT retroactively fix rows already sitting
+//  in the sheet, so this repair tool does that once.
+// ════════════════════════════════════════════
+async function repairMultiChildSponsorships(){
+  const [spon,students]=await Promise.all([dbRead('Sponsorships'),dbRead('Students')]);
+  const byNameKey={};
+  students.forEach(s=>{ if(s.name) byNameKey[_nameKey(s.name)]=s; });
+
+  // A row is "malformed" if its studentId contains more than one id
+  // (comma-joined) — the old single-row-per-sponsor format — OR its
+  // studentId doesn't match any real Student but studentName clearly
+  // lists more than one name.
+  const isMalformed=s=>{
+    const idParts=String(s.studentId||'').split(',').map(x=>x.trim()).filter(Boolean);
+    if(idParts.length>1)return true;
+    const nameParts=String(s.studentName||'').split(',').map(x=>x.trim()).filter(Boolean);
+    return nameParts.length>1 && !students.some(st=>st.id===s.studentId);
+  };
+
+  const malformed=spon.filter(isMalformed);
+  if(!malformed.length){ toast('✅ No multi-child records found — every sponsorship record is already one row per student.'); return; }
+
+  const preview=malformed.map(s=>`• ${s.sponsorName} → ${String(s.studentName||'').split(',').length} children in 1 record`).join('\n');
+  if(!confirm(`Found ${malformed.length} record(s) that still bundle multiple children into a single row:\n\n${preview}\n\nSplit each into one row per student (amount divided evenly) and remove the original bundled row? This cannot be undone.`))return;
+
+  let created=0,removed=0,failed=0;
+  const existingPairKeys=new Set(spon.map(s=>String(s.sponsorId)+'::'+String(s.studentId)));
+
+  for(const row of malformed){
+    const idParts=String(row.studentId||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const nameParts=String(row.studentName||'').split(',').map(x=>x.trim()).filter(Boolean);
+    // Prefer resolving by the joined studentId list; fall back to
+    // resolving each name against the Students sheet if ids are missing.
+    const resolved=[];
+    if(idParts.length>1){
+      idParts.forEach((id,i)=>{
+        const st=students.find(x=>x.id===id);
+        resolved.push({id, name: st?.name || nameParts[i] || '—'});
+      });
+    }else{
+      nameParts.forEach(nm=>{
+        const st=byNameKey[_nameKey(nm)];
+        if(st) resolved.push({id:st.id, name:st.name});
+        else console.warn('repairMultiChildSponsorships: could not match name to a Student record:',nm,'(sponsor:',row.sponsorName,') — skipped, add manually if needed.');
+      });
+    }
+    if(!resolved.length){ failed++; continue; }
+
+    const childCount=resolved.length;
+    const amountEach=Math.round(Number(row.amount||0)/childCount);
+    const committedEach=Math.round(Number(row.committedAmount||row.amount||0)/childCount);
+
+    for(const child of resolved){
+      const pairKey=String(row.sponsorId)+'::'+String(child.id);
+      if(existingPairKeys.has(pairKey))continue; // already has its own correct row somehow — don't double up
+      const result=await dbWrite('Sponsorships',{
+        id:uid(), studentId:child.id, studentName:child.name,
+        sponsorId:row.sponsorId, sponsorName:row.sponsorName,
+        status:row.status||'pending', fundedStatus:row.fundedStatus||'',
+        amount:amountEach, committedAmount:committedEach,
+        childrenCount:childCount, sponsorshipType:row.sponsorshipType||'',
+        startDate:row.startDate||'', coveredUntil:row.coveredUntil||'',
+        yearsFunded:row.yearsFunded||'', frequency:row.frequency||'',
+        term:row.term||'', session:row.session||'', notes:row.notes||'',
+        inviteMethod:row.inviteMethod||'', importBatchKey:pairKey,
+        repairedFrom:row.id, importedAt:row.importedAt||'',
+        createdAt:row.createdAt||new Date().toISOString(),
+      });
+      existingPairKeys.add(pairKey);
+      created++;
+    }
+    const del=await dbDelete('Sponsorships',row.id);
+    if(del?.success!==false && !del?.error) removed++; else failed++;
+  }
+
+  toast(failed
+    ? `🔧 Split into ${created} clean record(s), removed ${removed} bundled row(s) — ${failed} issue(s), see console`
+    : `🔧 Split into ${created} clean record(s), removed ${removed} bundled row(s)`);
   loadSponsorship();
 }
 
@@ -6228,48 +6344,210 @@ async function createMeeting(){
 // ════════════════════════════════════════════
 //  CO-FOUNDER SPONSORSHIP ANALYTICS
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+//  CO-FOUNDER SPONSORSHIP ANALYTICS
+// ════════════════════════════════════════════
+let _cfSponAll=[],_cfUsersAll=[],_cfCurrentTab='newest';
 async function loadCFSponsorship(){
-  const spon=await dbRead('Sponsorships');
-  const users=await dbRead('Users');
-  const now=new Date();
-  const oneMonthAgo=new Date(now.getTime()-30*24*60*60*1000);
+  const [spon,users]=await Promise.all([dbRead('Sponsorships'),dbRead('Users')]);
+  _cfSponAll=spon;_cfUsersAll=users;
+  populateCFYearFilter();
   renderCFSponTab('newest',spon,users);
+}
+function populateCFYearFilter(){
+  const sel=$('cf-spon-year-filter');
+  if(!sel)return;
+  const years=[...new Set(_cfSponAll.map(s=>s.startDate).filter(Boolean).map(d=>String(d).slice(0,4)))].sort().reverse();
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Any Year</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  sel.value=cur&&years.includes(cur)?cur:'';
+}
+function cfSponFilterBarHtml(){
+  return`<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="cf-spon-search" placeholder="🔍 Search student or sponsor..." value="${(_cfFilterState.q||'').replace(/"/g,'&quot;')}" oninput="applyCFSponFilters()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;width:220px;outline:none;">
+    <select id="cf-spon-status-filter" onchange="applyCFSponFilters()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;outline:none;">
+      <option value="">All Statuses</option>
+      <option value="active"${_cfFilterState.status==='active'?' selected':''}>Active ✅</option>
+      <option value="pending"${_cfFilterState.status==='pending'?' selected':''}>Pending ⏳</option>
+      <option value="inactive"${_cfFilterState.status==='inactive'?' selected':''}>Inactive/Expired</option>
+    </select>
+    <select id="cf-spon-year-filter" onchange="applyCFSponFilters()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;outline:none;"><option value="">Any Year</option></select>
+    <select id="cf-spon-month-filter" onchange="applyCFSponFilters()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;outline:none;">
+      <option value="">Any Month</option>
+      <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+      <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+      <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+      <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+    </select>
+    <label style="font-size:12px;color:var(--muted);">Start date from</label>
+    <input type="date" id="cf-spon-date-from" value="${_cfFilterState.from||''}" onchange="applyCFSponFilters()" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;outline:none;">
+    <label style="font-size:12px;color:var(--muted);">to</label>
+    <input type="date" id="cf-spon-date-to" value="${_cfFilterState.to||''}" onchange="applyCFSponFilters()" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;outline:none;">
+    <button class="btn btn-xs btn-ghost" onclick="clearCFSponFilters()">✕ Clear filters</button>
+  </div>`;
+}
+let _cfFilterState={q:'',status:'',year:'',month:'',from:'',to:''};
+function applyCFSponFilters(){
+  _cfFilterState={
+    q:$('cf-spon-search')?.value||'',
+    status:$('cf-spon-status-filter')?.value||'',
+    year:$('cf-spon-year-filter')?.value||'',
+    month:$('cf-spon-month-filter')?.value||'',
+    from:$('cf-spon-date-from')?.value||'',
+    to:$('cf-spon-date-to')?.value||'',
+  };
+  renderCFSponTab(_cfCurrentTab,_cfSponAll,_cfUsersAll);
+}
+function clearCFSponFilters(){
+  _cfFilterState={q:'',status:'',year:'',month:'',from:'',to:''};
+  renderCFSponTab(_cfCurrentTab,_cfSponAll,_cfUsersAll);
+}
+function getFilteredCFSponsorships(spon){
+  const {q,status,year,month,from,to}=_cfFilterState;
+  const ql=(q||'').toLowerCase();
+  return spon.filter(s=>{
+    if(ql&&!((s.studentName||'').toLowerCase().includes(ql)||(s.sponsorName||'').toLowerCase().includes(ql)))return false;
+    if(status&&s.status!==status)return false;
+    if(year||month||from||to){
+      if(!s.startDate)return false;
+      const d=new Date(s.startDate);
+      if(isNaN(d.getTime()))return false;
+      if(year&&String(d.getFullYear())!==year)return false;
+      if(month!==''&&String(d.getMonth())!==month)return false;
+      if(from&&s.startDate<from)return false;
+      if(to&&s.startDate>to)return false;
+    }
+    return true;
+  });
 }
 
 function renderCFSponTab(tab,spon,users){
+  _cfCurrentTab=tab;
   const el=$('cf-spon-content');
-  const now=new Date();
-  const oneMonthAgo=new Date(now.getTime()-30*24*60*60*1000);
+  const filtered=getFilteredCFSponsorships(spon);
+  const filterBar=cfSponFilterBarHtml();
+
   if(tab==='newest'){
-    const recent=spon.filter(s=>new Date(s.createdAt||s.startDate)>=oneMonthAgo);
-    el.innerHTML=`
+    // A record is "new" if the sponsorship itself actually STARTED
+    // recently — not if it was created/imported into the system
+    // recently. Using createdAt alone meant every bulk-imported
+    // historical record (createdAt = import time = today) showed up
+    // as "new," even sponsorships from 2020.
+    const now=new Date();
+    const thirtyDaysAgo=new Date(now.getTime()-30*24*60*60*1000);
+    const recent=filtered.filter(s=>{
+      const d=new Date(s.startDate||s.createdAt);
+      return !isNaN(d.getTime())&&d>=thirtyDaysAgo;
+    }).sort((a,b)=>new Date(b.startDate||b.createdAt)-new Date(a.startDate||a.createdAt));
+    el.innerHTML=filterBar+`
       <div class="card">
         <div class="card-header"><div class="card-title">🆕 New Sponsorships — Last 30 Days</div><span class="badge b-blue">${recent.length} new</span></div>
         <div class="data-table-wrap"><table class="data-table">
-          <thead><tr><th>Student</th><th>Sponsor</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th>Means of Invite</th></tr></thead>
+          <thead><tr><th>Student</th><th>Sponsor</th><th>Annual Amount</th><th>Frequency</th><th>Status</th><th>Start Date</th><th>Means of Invite</th></tr></thead>
           <tbody>${recent.map(s=>{
             const sp=users.find(u=>u.id===s.sponsorId)||{};
             return`<tr>
               <td><strong>${s.studentName||'—'}</strong></td>
               <td>${s.sponsorName||'—'}</td>
-              <td>₦${Number(s.amount||0).toLocaleString()}</td>
-              <td><span class="badge b-blue">${s.sponsorshipType==='year'?'Annual':'Per Term'}</span></td>
+              <td>₦${Number(s.amount||0).toLocaleString()}/yr</td>
+              <td><span class="badge b-blue">${s.frequency||'—'}</span></td>
               <td><span class="badge ${s.status==='active'?'b-active-spon':s.status==='pending'?'b-pending-spon':'b-renewal-spon'}">${s.status}</span></td>
-              <td>${fmtDate(s.createdAt||s.startDate)}</td>
+              <td>${fmtDate(s.startDate)}</td>
               <td><span class="badge b-teal">${sp.inviteMethod||s.inviteMethod||'—'}</span></td>
-            </tr>`;}).join('')||'<tr><td colspan="7"><div class="empty"><p>No new sponsorships this month</p></div></td></tr>'}
+            </tr>`;}).join('')||'<tr><td colspan="7"><div class="empty"><p>No sponsorships actually started in the last 30 days</p></div></td></tr>'}
           </tbody>
         </table></div>
       </div>`;
+
+  } else if(tab==='by-student'){
+    const rows=[...filtered].sort((a,b)=>(a.studentName||'').localeCompare(b.studentName||''));
+    const grouped={};
+    rows.forEach(s=>{ (grouped[s.studentName||'—']=grouped[s.studentName||'—']||[]).push(s); });
+    const dualSponsored=Object.entries(grouped).filter(([,rs])=>rs.length>1);
+    el.innerHTML=filterBar+`
+      <div class="card">
+        <div class="card-header"><div class="card-title">👤 By Student</div><span class="badge b-blue">${Object.keys(grouped).length} students · ${rows.length} sponsorship record(s)</span></div>
+        ${dualSponsored.length?`<div class="alert al-info" style="margin:0 16px 10px;">ℹ️ ${dualSponsored.length} student(s) have more than one sponsorship record — this is expected when a child is co-sponsored (e.g. individually AND through a pooled/grant sponsor).</div>`:''}
+        <div class="data-table-wrap"><table class="data-table">
+          <thead><tr><th>Student</th><th>Sponsor(s)</th><th>Annual Total</th><th>Status</th><th>Start Date</th></tr></thead>
+          <tbody>${Object.entries(grouped).map(([name,rs])=>`
+            <tr>
+              <td><strong>${name}</strong>${rs.length>1?` <span class="badge b-gold">×${rs.length}</span>`:''}</td>
+              <td>${rs.map(r=>r.sponsorName).join(', ')}</td>
+              <td>₦${rs.reduce((a,r)=>a+Number(r.amount||0),0).toLocaleString()}/yr</td>
+              <td>${rs.map(r=>`<span class="badge ${r.status==='active'?'b-active-spon':r.status==='pending'?'b-pending-spon':'b-renewal-spon'}" style="margin-right:3px;">${r.status}</span>`).join('')}</td>
+              <td>${fmtDate(rs[0].startDate)}</td>
+            </tr>`).join('')||'<tr><td colspan="5"><div class="empty"><p>No records match these filters</p></div></td></tr>'}
+          </tbody>
+        </table></div>
+      </div>`;
+
+  } else if(tab==='by-sponsor'){
+    const groups={};
+    filtered.forEach(s=>{
+      const key=s.sponsorId||s.sponsorName;
+      if(!groups[key])groups[key]={sponsorId:s.sponsorId,name:s.sponsorName,children:0,active:0,pending:0,total:0};
+      groups[key].children++;
+      groups[key].total+=Number(s.amount||0);
+      if(s.status==='active')groups[key].active++;
+      if(s.status==='pending')groups[key].pending++;
+    });
+    const list=Object.values(groups).sort((a,b)=>b.total-a.total);
+    el.innerHTML=filterBar+`
+      <div class="card">
+        <div class="card-header"><div class="card-title">🤝 By Sponsor</div><span class="badge b-blue">${list.length} sponsor(s)</span></div>
+        <div class="data-table-wrap"><table class="data-table">
+          <thead><tr><th>Sponsor</th><th>Children</th><th>Active</th><th>Pending</th><th>Total Annual Commitment</th></tr></thead>
+          <tbody>${list.map(g=>`
+            <tr style="cursor:pointer;" onclick="viewSponsorDetail('${g.sponsorId}')">
+              <td><strong>${g.name}</strong></td>
+              <td>${g.children}</td>
+              <td><span class="badge b-active-spon">${g.active}</span></td>
+              <td>${g.pending?`<span class="badge b-pending-spon">${g.pending}</span>`:'—'}</td>
+              <td>₦${g.total.toLocaleString()}/yr</td>
+            </tr>`).join('')||'<tr><td colspan="5"><div class="empty"><p>No sponsors match these filters</p></div></td></tr>'}
+          </tbody>
+        </table></div>
+      </div>`;
+
+  } else if(tab==='by-month'){
+    const groups={};
+    filtered.forEach(s=>{
+      if(!s.startDate)return;
+      const d=new Date(s.startDate);
+      if(isNaN(d.getTime()))return;
+      const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      if(!groups[key])groups[key]={key,count:0,total:0};
+      groups[key].count++;groups[key].total+=Number(s.amount||0);
+    });
+    const list=Object.values(groups).sort((a,b)=>a.key.localeCompare(b.key));
+    const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    el.innerHTML=filterBar+`
+      <div class="card">
+        <div class="card-header"><div class="card-title">📅 By Month (sponsorship start date)</div><span class="badge b-blue">${list.length} month(s)</span></div>
+        <div class="card-body">
+          <canvas id="cf-month-chart" class="chart-canvas" style="margin-bottom:14px;"></canvas>
+        </div>
+        <div class="data-table-wrap"><table class="data-table">
+          <thead><tr><th>Month</th><th>New Sponsorships</th><th>Annual Commitment Added</th></tr></thead>
+          <tbody>${list.map(g=>{
+            const [y,m]=g.key.split('-');
+            return`<tr><td>${monthNames[Number(m)-1]} ${y}</td><td>${g.count}</td><td>₦${g.total.toLocaleString()}</td></tr>`;
+          }).join('')||'<tr><td colspan="3"><div class="empty"><p>No records match these filters</p></div></td></tr>'}
+          </tbody>
+        </table></div>
+      </div>`;
+    if(list.length)setTimeout(()=>drawBarChart('cf-month-chart',list.map(g=>({label:g.key.slice(2),val:g.count}))),200);
+
   } else if(tab==='by-invite'){
     const groups={};
-    spon.forEach(s=>{
+    filtered.forEach(s=>{
       const sp=users.find(u=>u.id===s.sponsorId)||{};
       const method=sp.inviteMethod||s.inviteMethod||'Unknown';
       if(!groups[method])groups[method]={method,count:0,total:0};
       groups[method].count++;groups[method].total+=Number(s.amount||0);
     });
-    el.innerHTML=`
+    el.innerHTML=filterBar+`
       <div class="card">
         <div class="card-header"><div class="card-title">📊 By Means of Invite</div></div>
         <div class="card-body">
@@ -6279,14 +6557,15 @@ function renderCFSponTab(tab,spon,users){
               <div style="width:42px;height:42px;border-radius:10px;background:var(--g-blue);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;flex-shrink:0;">🔗</div>
               <div style="flex:1;"><div style="font-size:13.5px;font-weight:700;">${g.method}</div></div>
               <div style="text-align:right;"><div style="font-size:16px;font-weight:800;color:var(--blue);">${g.count}</div><div style="font-size:10px;color:var(--muted);">sponsors</div></div>
-              <div style="text-align:right;"><div style="font-size:14px;font-weight:700;color:var(--green);">₦${g.total.toLocaleString()}</div><div style="font-size:10px;color:var(--muted);">total</div></div>
-            </div>`).join('')}
+              <div style="text-align:right;"><div style="font-size:14px;font-weight:700;color:var(--green);">₦${g.total.toLocaleString()}</div><div style="font-size:10px;color:var(--muted);">annual total</div></div>
+            </div>`).join('')||'<div class="empty"><p>No records match these filters</p></div>'}
         </div>
       </div>`;
-    setTimeout(()=>drawBarChart('cf-invite-chart',Object.values(groups).map(g=>({label:g.method.slice(0,8),val:g.count}))),200);
+    if(Object.keys(groups).length)setTimeout(()=>drawBarChart('cf-invite-chart',Object.values(groups).map(g=>({label:g.method.slice(0,8),val:g.count}))),200);
   } else {
-    el.innerHTML=`<div class="empty"><div class="empty-icon">❤️</div><p>Select a filter tab above to view sponsorship analytics</p></div>`;
+    el.innerHTML=filterBar+`<div class="empty"><div class="empty-icon">❤️</div><p>Select a filter tab above to view sponsorship analytics</p></div>`;
   }
+  populateCFYearFilter();
 }
 
 document.addEventListener('click',e=>{
@@ -6295,7 +6574,11 @@ document.addEventListener('click',e=>{
     const tab=btn.textContent.trim();
     const tabMap={'🆕 Newest (30 days)':'newest','By Student':'by-student','By Sponsor':'by-sponsor','By Month':'by-month','By Means of Invite':'by-invite'};
     const tabKey=Object.entries(tabMap).find(([k])=>tab.includes(k.slice(0,8)))?.[1]||'newest';
-    dbRead('Sponsorships').then(spon=>dbRead('Users').then(users=>renderCFSponTab(tabKey,spon,users)));
+    if(_cfSponAll.length||_cfUsersAll.length){
+      renderCFSponTab(tabKey,_cfSponAll,_cfUsersAll);
+    }else{
+      dbRead('Sponsorships').then(spon=>dbRead('Users').then(users=>{_cfSponAll=spon;_cfUsersAll=users;renderCFSponTab(tabKey,spon,users);}));
+    }
   }
 });
 
