@@ -2925,15 +2925,16 @@ function startKeepAlive() {}
 // ════════════════════════════════════════════
 //  UTILITIES
 // ════════════════════════════════════════════
-// Supabase has no server-side environment like Apps Script to send
-// Gmail from directly — email delivery now goes through a small
-// Edge Function (see supabase/functions/send-email in the migration
-// notes) that calls a real email provider (Resend by default).
+// Email goes straight through Postgres (send_app_email, defined in
+// knosk_eyeq_schema.sql, using pg_net + Vault) — no separate function
+// to deploy.
 async function sendEmailViaSupabase({toEmails, ccEmails=[], subject, body, senderName, senderRole, senderId, senderEmail}){
-  const { data, error } = await sb.functions.invoke('send-email', {
-    body: { toEmails, ccEmails, subject, body, senderName, senderRole }
+  const { data, error } = await sb.rpc('send_app_email', {
+    p_to_emails: toEmails, p_cc_emails: ccEmails, p_subject: subject, p_body: body,
+    p_sender_name: senderName||S.name, p_sender_role: senderRole||S.role,
   });
   if (error) return { error: error.message || 'Email delivery failed.' };
+  if (data && data.success === false) return { error: data.error || 'Email delivery failed.' };
   const emailId = uid();
   await dbWrite('Emails', {
     id: emailId, senderId: senderId||S.id, senderName: senderName||S.name,
