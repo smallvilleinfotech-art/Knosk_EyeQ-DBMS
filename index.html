@@ -2179,7 +2179,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 
     <div id="fp-step1">
       <h2>Reset your password</h2>
-      <div class="modal-sub">Enter your account email and we'll send a 6-digit reset code.</div>
+      <div class="modal-sub">Enter your account email and we'll send a password reset link.</div>
       <div class="fg fg-icon">
         <label>Email Address</label>
         <span class="fi">✉️</span>
@@ -2188,7 +2188,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
       <div class="auth-err" id="fp-err1" style="display:none;"></div>
       <div class="modal-acts">
         <button class="btn btn-ghost btn-sm" onclick="closeForgotPassword()">Cancel</button>
-        <button class="btn btn-blue btn-sm" id="fp-send-btn" onclick="sendResetCode(false)">Send Reset Code</button>
+        <button class="btn btn-blue btn-sm" id="fp-send-btn" onclick="sendResetCode(false)">Send Reset Link</button>
       </div>
     </div>
 
@@ -2211,7 +2211,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
       </div>
       <div class="auth-err" id="fp-err2" style="display:none;"></div>
       <div class="modal-acts">
-        <button class="btn btn-ghost btn-sm" onclick="sendResetCode(true)">Resend Code</button>
+        <button class="btn btn-ghost btn-sm" onclick="sendResetCode(true)">Resend Link</button>
         <button class="btn btn-blue btn-sm" id="fp-reset-btn" onclick="submitNewPassword()">Set New Password</button>
       </div>
     </div>
@@ -2548,6 +2548,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
     <div class="modal-acts"><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-create-prog')">Cancel</button><button class="btn btn-blue btn-sm" onclick="createProgram()">Create Program</button></div>
   </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 // ════════════════════════════════════════════
 //  KNOSK EYEQ v2.0 — COMPLETE JAVASCRIPT ENGINE
@@ -2556,7 +2557,15 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 //  sponsor directory with track records
 // ════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwMXt4MsciAwGnaTfMDW8LA7g2Gdzmjhqu0hcApUO-UqBwzUNTimhO1lQ9pgDs63GPE/exec';
+// ── SUPABASE CONNECTION ──
+// Fill these in from Supabase → Project Settings → API. The anon key
+// is safe to expose client-side; it only grants what your RLS
+// policies (from knosk_eyeq_schema.sql) allow.
+const SUPABASE_URL = 'https://qrxeoalsugshqnbewwgq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFyeGVvYWxzdWdzaHFuYmV3d2dxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzA5NTksImV4cCI6MjA5OTUwNjk1OX0.k02C21c8AsQ3q0zsBbR7Wfm8Rt-AetEGEZhIFqaW-BM';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, storage: window.localStorage }
+});
 let S = {}; // session
 
 // ════════════════════════════════════════════
@@ -2720,86 +2729,117 @@ const EXERCISE_BANK = [
   {subject:'Agricultural Science',q:'Which soil type is best for crop farming?',opts:['Loamy','Sandy','Clay','Rocky'],correct:0,explanation:'Loamy soil retains moisture and nutrients'},
 ];
 
-// ── Secure API Layer (POST-only, token-authenticated) ──
-let _sessionToken = null;
-let _sessionUserId = null;
+// ── SHEET NAME → SUPABASE TABLE NAME ──
+// The rest of this file still calls dbRead('Sponsorships') etc. using
+// the old Google-Sheets-era names — this map is the only place that
+// needs to know the real Postgres table names.
+const SHEET_TABLE_MAP = {
+  Users:'profiles', Students:'students', Sponsorships:'sponsorships',
+  Payments:'payments', CaScores:'ca_scores', Emails:'emails',
+  Content:'content', Concerns:'concerns', Programs:'programs',
+  Attendance:'attendance', Notifications:'notifications', Messages:'messages',
+  ExerciseScores:'exercise_scores', Settings:'settings',
+  Announcements:'announcements', ActivityLog:'activity_log',
+  Meetings:'meetings', ExamPrograms:'exam_programs',
+};
 
-async function safePost(b){
-  // Always attach token + our OWN identity for auth validation.
-  // IMPORTANT: this must NOT be named 'userId' — several actions
-  // (like deleteUser) already have their own 'userId' field meaning
-  // "the target user", and Object.assign would let this overwrite
-  // that, silently turning "delete THAT user" into "delete ME".
-  // That collision is what was deleting the System Administrator's
-  // own row on every delete attempt.
-  const payload = (_sessionToken && _sessionUserId)
-    ? Object.assign({}, b, {token: _sessionToken, authUserId: _sessionUserId})
-    : b;
-  try {
-    // Use 'text/plain' Content-Type to avoid CORS preflight redirect on Google Apps Script.
-    // GAS receives the JSON string in e.postData.contents and parses it in doPost.
-    const r = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain'},
-      body: JSON.stringify(payload),
-      redirect: 'follow'
-    });
-    if(!r.ok) throw new Error('Network error: ' + r.status);
-    const data = await r.json();
-    // If server says session expired, force re-login
-    if(data && data.authError){
-      forceLogout('Session expired. Please sign in again.');
-    }
-    return data;
-  } catch(e) {
-    console.error('API error:', e.message);
-    return {error: e.message};
+// ── FIELD NAME TRANSLATION (camelCase JS ↔ snake_case Postgres) ──
+// Handles the mechanical cases automatically; SHEET_FIELD_OVERRIDES
+// below covers the handful of fields that were deliberately renamed
+// for clarity in the new schema (e.g. amount → annual_amount).
+function _camelToSnake(k){ return k.replace(/([A-Z])/g,'_$1').toLowerCase(); }
+function _snakeToCamel(k){ return k.replace(/_([a-z0-9])/g,(_,c)=>c.toUpperCase()); }
+
+const SHEET_FIELD_OVERRIDES = {
+  Sponsorships: { amount:'annual_amount', committedAmount:'committed_amount',
+    paidAmount:'paid_amount', sponsorshipType:'cohort' },
+};
+// Fields that exist on the JS object but are DERIVED via a join
+// (not real columns) — stripped before writing, attached after reading.
+const SHEET_DERIVED_FIELDS = {
+  Sponsorships: ['studentName','sponsorName'],
+};
+// Fields the old sheets carried that have no column in the new schema
+// (either unused, or superseded — e.g. importedAt ≈ createdAt).
+const SHEET_DROP_ON_WRITE = {
+  Sponsorships: ['importedAt','repairedFrom'],
+};
+
+function _toDbRow(sheet, row){
+  const overrides = SHEET_FIELD_OVERRIDES[sheet] || {};
+  const derived = new Set(SHEET_DERIVED_FIELDS[sheet] || []);
+  const drop = new Set(SHEET_DROP_ON_WRITE[sheet] || []);
+  const out = {};
+  Object.entries(row).forEach(([k,v])=>{
+    if (derived.has(k) || drop.has(k)) return;
+    const dbKey = overrides[k] || _camelToSnake(k);
+    out[dbKey] = v;
+  });
+  return out;
+}
+function _fromDbRow(sheet, row){
+  const overrides = SHEET_FIELD_OVERRIDES[sheet] || {};
+  const reverseOverrides = Object.fromEntries(Object.entries(overrides).map(([k,v])=>[v,k]));
+  const out = {};
+  Object.entries(row).forEach(([k,v])=>{
+    if (k==='students' || k==='profiles') return; // embedded join objects handled below
+    const jsKey = reverseOverrides[k] || _snakeToCamel(k);
+    out[jsKey] = v;
+  });
+  // Attach joined display names for Sponsorships so the ~30 call sites
+  // reading sp.studentName / sp.sponsorName elsewhere keep working.
+  if (sheet==='Sponsorships'){
+    if (row.students) out.studentName = row.students.name;
+    if (row.profiles)  out.sponsorName = row.profiles.name;
   }
+  return out;
+}
+
+// ── SUPABASE-BACKED READ/WRITE (same signatures as before) ──
+async function _supaSelect(sheet){
+  const table = SHEET_TABLE_MAP[sheet];
+  let query = sb.from(table).select(
+    sheet==='Sponsorships' ? '*, students(name), profiles(name)' : '*'
+  );
+  // Every table except settings/activity_log uses soft-delete.
+  if (!['settings','activity_log'].includes(table)) query = query.is('deleted_at', null);
+  const { data, error } = await query;
+  if (error){ console.error('[supabase read]', table, error.message); return []; }
+  return (data||[]).map(r=>_fromDbRow(sheet, r));
 }
 
 // ════════════════════════════════════════════
 //  ⚡ SPEED LAYER — Cache + Lazy Load + Background Refresh
-//  All 62 dbRead calls go through here automatically.
-//  FIX 1: In-memory cache — data fetched once, reused instantly
-//  FIX 2: Lazy load — only fetch a sheet when first needed
-//  FIX 3: Background refresh — stale data shows instantly, fresh data
-//          arrives silently in the background without blocking the UI
-//  FIX 4: Optimistic UI — writes update cache immediately, don't wait
+//  Same caching contract as before; only what's UNDER dbRead/dbWrite/
+//  dbUpdate/dbDelete changed (Supabase instead of Apps Script). This
+//  keeps the other ~150 call sites throughout the file unchanged.
 // ════════════════════════════════════════════
-
-const _cache = {};            // { sheetName: { data: [], ts: timestamp } }
-const _pending = {};          // { sheetName: Promise } — deduplicates concurrent fetches
-const CACHE_TTL = 90000;      // 90 seconds — data older than this triggers background refresh
-const CACHE_STALE = 15000;    // 15 seconds — data newer than this is always served from cache
-
-// Sheets that change frequently — shorter TTL, refresh more aggressively
-// Sponsorships is included here (not in STABLE_SHEETS) because it's the
-// sheet system admins actively correct/edit, and the dashboard's accuracy
-// depends on it never sitting stale for minutes at a time.
+const _cache = {};
+const _pending = {};
+const CACHE_TTL = 90000;
+const CACHE_STALE = 15000;
 const VOLATILE_SHEETS = ['Messages','Notifications','ActivityLog','Emails','Sponsorships'];
-// Sheets that rarely change — serve from cache longer
 const STABLE_SHEETS   = ['Users','Programs','ExamPrograms','Settings'];
 
 function _ttl(sheet) {
-  if (VOLATILE_SHEETS.includes(sheet)) return 20000;   // 20s for live data
-  if (STABLE_SHEETS.includes(sheet))   return 300000;  // 5 min for stable data
+  if (VOLATILE_SHEETS.includes(sheet)) return 20000;
+  if (STABLE_SHEETS.includes(sheet))   return 300000;
   return CACHE_TTL;
 }
 
-// Fetch from server and update cache (used internally)
 async function _fetchSheet(sheet) {
-  if (_pending[sheet]) return _pending[sheet]; // deduplicate concurrent requests
+  if (_pending[sheet]) return _pending[sheet];
   const dot = document.getElementById('sync-dot');
   if (dot) dot.classList.add('active');
-  _pending[sheet] = safePost({action:'read', sheet})
-    .then(r => {
-      const data = Array.isArray(r) ? r : [];
+  _pending[sheet] = _supaSelect(sheet)
+    .then(data => {
       _cache[sheet] = { data, ts: Date.now() };
       delete _pending[sheet];
       if (Object.keys(_pending).length === 0 && dot) dot.classList.remove('active');
       return data;
     })
-    .catch(() => {
+    .catch(err => {
+      console.error('[dbRead]', sheet, err);
       delete _pending[sheet];
       if (Object.keys(_pending).length === 0 && dot) dot.classList.remove('active');
       return _cache[sheet]?.data || [];
@@ -2807,87 +2847,60 @@ async function _fetchSheet(sheet) {
   return _pending[sheet];
 }
 
-// ── MAIN READ FUNCTION (replaces old dbRead) ──
-// Returns cached data instantly if fresh, otherwise fetches.
-// If data is stale (but exists), returns it immediately AND refreshes in background.
 async function dbRead(sheet) {
   const cached = _cache[sheet];
   const age = cached ? Date.now() - cached.ts : Infinity;
   const ttl = _ttl(sheet);
-
-  // ① Data is fresh — return instantly from cache
-  if (cached && age < CACHE_STALE) {
-    return cached.data;
-  }
-
-  // ② Data is stale but exists — return it NOW, refresh silently in background
-  if (cached && age < ttl * 3) {
-    _fetchSheet(sheet); // fire-and-forget background refresh
-    return cached.data; // instant return — UI never waits
-  }
-
-  // ③ No cache or very old — must fetch (first load of this sheet)
+  if (cached && age < CACHE_STALE) return cached.data;
+  if (cached && age < ttl * 3) { _fetchSheet(sheet); return cached.data; }
   return _fetchSheet(sheet);
 }
 
-// ── CACHE INVALIDATION ── call after writes so next read gets fresh data
-function _invalidate(sheet) {
-  delete _cache[sheet];
-}
-// Alias for compatibility
+function _invalidate(sheet) { delete _cache[sheet]; }
 const _inv = _invalidate;
 
-// ── WRITE — optimistic: update cache immediately, then sync to server ──
 async function dbWrite(sheet, row) {
-  // Optimistically add to local cache so UI reflects change instantly
-  if (_cache[sheet]) {
-    _cache[sheet].data = [..._cache[sheet].data, row];
-  }
-  const result = await safePost({action:'write', sheet, row});
-  if (!result?.success) _invalidate(sheet); // rollback on failure
-  return result;
+  if (_cache[sheet]) _cache[sheet].data = [..._cache[sheet].data, row];
+  const table = SHEET_TABLE_MAP[sheet];
+  const { error } = await sb.from(table).insert(_toDbRow(sheet, row));
+  if (error){ console.error('[dbWrite]', table, error.message); _invalidate(sheet); return {success:false, error:error.message}; }
+  return {success:true, id:row.id};
 }
 
-// ── UPDATE — optimistic: patch cache immediately ──
 async function dbUpdate(sheet, id, updates) {
-  // Optimistically patch the cached row so UI reflects change instantly
   if (_cache[sheet]) {
-    _cache[sheet].data = _cache[sheet].data.map(r =>
-      String(r.id) === String(id) ? {...r, ...updates} : r
-    );
+    _cache[sheet].data = _cache[sheet].data.map(r => String(r.id)===String(id) ? {...r, ...updates} : r);
   }
-  const result = await safePost({action:'update', sheet, id, updates});
-  if (!result?.success) _invalidate(sheet); // rollback on failure
-  return result;
+  const table = SHEET_TABLE_MAP[sheet];
+  const { error } = await sb.from(table).update(_toDbRow(sheet, updates)).eq('id', id);
+  if (error){ console.error('[dbUpdate]', table, error.message); _invalidate(sheet); return {success:false, error:error.message}; }
+  return {success:true};
 }
 
-// ── DELETE — optimistic: remove from cache immediately ──
-// NOTE: requires the Apps Script backend (doPost) to handle
-// {action:'delete', sheet, id} by removing the matching row from the
-// named sheet. If your backend only has the sheet-specific
-// 'deleteUser' handler today, add a generic branch like:
-//   if (action === 'delete') { deleteRowById(sheet, id); return ok(); }
-// so this works for Sponsorships, Students, etc. — not just Users.
+// Soft-delete by default (sets deleted_at) — matches every view/RLS
+// policy in knosk_eyeq_schema.sql, which already filters deleted_at
+// is null. Postgres row deletion doesn't have the "shifts every row
+// below it" problem Google Sheets had, so a real DELETE is also safe
+// here if you'd rather hard-delete — swap .update({deleted_at:...})
+// for .delete() below if you want that instead.
 async function dbDelete(sheet, id) {
   const prev = _cache[sheet]?.data;
-  if (_cache[sheet]) {
-    _cache[sheet].data = _cache[sheet].data.filter(r => String(r.id) !== String(id));
-  }
-  const result = await safePost({action:'delete', sheet, id});
-  if (!result?.success) {
-    if (_cache[sheet] && prev) _cache[sheet].data = prev; // rollback on failure
+  if (_cache[sheet]) _cache[sheet].data = _cache[sheet].data.filter(r => String(r.id) !== String(id));
+  const table = SHEET_TABLE_MAP[sheet];
+  const { error } = await sb.from(table).update({ deleted_at: new Date().toISOString() }).eq('id', id);
+  if (error){
+    console.error('[dbDelete]', table, error.message);
+    if (_cache[sheet] && prev) _cache[sheet].data = prev;
     _invalidate(sheet);
+    return {success:false, error:error.message};
   }
-  return result;
+  return {success:true};
 }
 
 // ── CACHE WARMING — preload the most-used sheets right after login ──
-// Runs in background so login itself is not delayed
 async function warmCache() {
   const role = S.role;
-  // Always warm these core sheets
   const core = ['Students','Users','Sponsorships'];
-  // Role-specific extras
   const extras = {
     admin:             ['Concerns','Content','ActivityLog','Notifications'],
     cofounder:         ['Concerns','Content','ActivityLog'],
@@ -2899,31 +2912,39 @@ async function warmCache() {
     sponsor:           ['Sponsorships'],
   };
   const sheets = [...core, ...(extras[role] || [])];
-  // Stagger requests 200ms apart — avoids hammering GAS simultaneously
   for (const sheet of sheets) {
-    if (!_cache[sheet]) {
-      _fetchSheet(sheet);
-      await new Promise(r => setTimeout(r, 200));
-    }
+    if (!_cache[sheet]) { _fetchSheet(sheet); await new Promise(r => setTimeout(r, 150)); }
   }
 }
 
-// ── KEEP-ALIVE PING — prevents GAS cold starts ──
-// Pings the backend every 4 minutes so it never goes to sleep
-function startKeepAlive() {
-  // Ping immediately to warm up, then every 4 minutes
-  setTimeout(() => {
-    safePost({action:'ping'}).catch(() => {});
-  }, 3000);
-  setInterval(() => {
-    safePost({action:'ping'}).catch(() => {});
-  }, 4 * 60 * 1000);
-}
+// Supabase has no cold-start problem (unlike Apps Script), so the old
+// keep-alive ping is no longer needed — kept as a no-op so any
+// remaining startKeepAlive() call elsewhere doesn't throw.
+function startKeepAlive() {}
 
 // ════════════════════════════════════════════
 //  UTILITIES
 // ════════════════════════════════════════════
-function uid(){return 'id_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);}
+// Supabase has no server-side environment like Apps Script to send
+// Gmail from directly — email delivery now goes through a small
+// Edge Function (see supabase/functions/send-email in the migration
+// notes) that calls a real email provider (Resend by default).
+async function sendEmailViaSupabase({toEmails, ccEmails=[], subject, body, senderName, senderRole, senderId, senderEmail}){
+  const { data, error } = await sb.functions.invoke('send-email', {
+    body: { toEmails, ccEmails, subject, body, senderName, senderRole }
+  });
+  if (error) return { error: error.message || 'Email delivery failed.' };
+  const emailId = uid();
+  await dbWrite('Emails', {
+    id: emailId, senderId: senderId||S.id, senderName: senderName||S.name,
+    senderEmail: senderEmail||S.email||'', senderRole: senderRole||S.role,
+    toEmails, ccEmails, subject, body, sentAt: new Date().toISOString(),
+    status: 'sent', messageId: emailId, replyTo: senderEmail||S.email||'', read: false,
+  });
+  return { success: true, messageId: emailId };
+}
+
+function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);})); }
 // System admin = full-access roles allowed to edit/delete raw records
 // (as opposed to knosk_programs, teacher, student, sponsor, etc. who
 // should never see edit/delete controls on other people's data).
@@ -3024,24 +3045,25 @@ async function doLogin(){
   const btn=$('login-btn');
   if(!email||!pass){err.style.display='block';err.textContent='Please enter email and password.';return;}
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Signing in...';
-  // Login uses POST — credentials never appear in URL or browser history
-  let res;
-  try { res=await safePost({action:'login',email,password:pass}); } catch(e){ res={success:false}; }
+  const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
   btn.disabled=false;btn.innerHTML='Sign In to Knosk EyeQ';
-  // Only show safe, user-friendly error messages — never raw server/network text
-  if(!res?.success){
-    const safeErrors=['Invalid email or password','Account pending approval by admin','Account suspended. Contact school admin.','Email and password required'];
-    const msg = safeErrors.includes(res?.error) ? res.error : 'Login failed. Please check your credentials.';
-    err.style.display='block';err.textContent=msg;return;
+  if(error){
+    err.style.display='block';
+    err.textContent = /invalid/i.test(error.message) ? 'Invalid email or password' : 'Login failed. Please check your credentials.';
+    return;
   }
+  const {data:profile,error:profErr}=await sb.from('profiles').select('*').eq('id',data.user.id).single();
+  if(profErr || !profile){
+    await sb.auth.signOut();
+    err.style.display='block'; err.textContent='Could not load your account profile. Contact an admin.'; return;
+  }
+  if(profile.status==='pending'){ await sb.auth.signOut(); err.style.display='block'; err.textContent='Account pending approval by admin'; return; }
+  if(profile.status==='suspended'){ await sb.auth.signOut(); err.style.display='block'; err.textContent='Account suspended. Contact school admin.'; return; }
+  if(profile.status==='inactive'){ await sb.auth.signOut(); err.style.display='block'; err.textContent='Account inactive. Contact school admin.'; return; }
   err.style.display='none';
-  S=res.user;
-  // Store session token + userId for all subsequent authenticated requests
-  if(res.token){ _sessionToken=res.token; _sessionUserId=S.id; }
+  S=_fromDbRow('Users',profile);
+  S.id=profile.id;
   sessionStorage.setItem('knosk_s',JSON.stringify(S));
-  if(res.token){ sessionStorage.setItem('knosk_t',res.token); sessionStorage.setItem('knosk_u',S.id); }
-  // ⚡ Start keep-alive ping + background cache warming immediately after login
-  startKeepAlive();
   warmCache(); // fire-and-forget — does not delay the welcome page
   resetInactivityTimer();
   showWelcomePage();
@@ -3076,37 +3098,59 @@ async function sendResetCode(isResend){
   _fpEmail = email;
   err.style.display='none';
   if(!isResend){ btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending...'; }
-  let res;
-  try{ res = await safePost({action:'requestPasswordReset', email}); } catch(e){ res={success:false}; }
+  // NOTE: Supabase's native reset flow emails a LINK, not a 6-digit
+  // code — clicking it opens this app with a temporary recovery
+  // session, at which point sb.auth.onAuthStateChange fires
+  // 'PASSWORD_RECOVERY' (see the listener near DOMContentLoaded below)
+  // and the app jumps straight to fp-step3 (set new password).
+  // fp-step2 (code entry) is skipped entirely in this flow.
+  const {error} = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
   if(!isResend){ btn.disabled=false; btn.innerHTML='Send Reset Code'; }
-  if(!res?.success){
-    err.style.display='block'; err.textContent=res?.error||'Something went wrong. Please try again.'; return;
+  if(error){
+    err.style.display='block'; err.textContent=error.message||'Something went wrong. Please try again.'; return;
   }
   $('fp-step1').style.display='none';
   $('fp-step2').style.display='block';
-  if(isResend){ toast('A new code has been sent.','ok'); }
+  // This flow emails a LINK, not a code — hide the now-irrelevant code
+  // field and repurpose the copy, rather than requiring new markup.
+  const codeField=$('fp-code')?.closest('.fg');
+  if(codeField) codeField.style.display='none';
+  const sub=document.querySelector('#fp-step2 .modal-sub');
+  if(sub) sub.textContent=`We sent a password reset link to ${email}. Open it on this device, then set your new password below.`;
+  if(isResend){ toast('A new reset link has been sent.','ok'); }
 }
 
+// Fires when the user arrives here via the reset-link redirect.
 async function submitNewPassword(){
-  const code=$('fp-code').value.trim();
   const p1=$('fp-pass1').value;
   const p2=$('fp-pass2').value;
   const err=$('fp-err2');
   const btn=$('fp-reset-btn');
-  if(!/^\d{6}$/.test(code)){ err.style.display='block'; err.textContent='Enter the 6-digit code from your email.'; return; }
   if(p1.length<6){ err.style.display='block'; err.textContent='Password must be at least 6 characters.'; return; }
   if(p1!==p2){ err.style.display='block'; err.textContent='Passwords do not match.'; return; }
   err.style.display='none';
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Updating...';
-  let res;
-  try{ res = await safePost({action:'resetPassword', email:_fpEmail, code, newPassword:p1}); } catch(e){ res={success:false}; }
+  const {error} = await sb.auth.updateUser({ password: p1 });
   btn.disabled=false; btn.innerHTML='Set New Password';
-  if(!res?.success){
-    err.style.display='block'; err.textContent=res?.error||'Something went wrong. Please try again.'; return;
+  if(error){
+    err.style.display='block'; err.textContent=error.message||'Something went wrong. Please try again.'; return;
   }
   $('fp-step2').style.display='none';
   $('fp-step3').style.display='block';
 }
+// Listens for the recovery-session redirect (user clicked the emailed
+// link) and jumps straight to the password-entry step.
+sb.auth.onAuthStateChange((event)=>{
+  if(event==='PASSWORD_RECOVERY'){
+    openForgotPassword();
+    $('fp-step1').style.display='none';
+    $('fp-step2').style.display='block';
+    const codeField=$('fp-code')?.closest('.fg');
+    if(codeField) codeField.style.display='none';
+    const sub=document.querySelector('#fp-step2 .modal-sub');
+    if(sub) sub.textContent='Enter your new password below.';
+  }
+});
 
 async function showWelcomePage(){
   // Build welcome page
@@ -3168,6 +3212,7 @@ function buildRoleGrid(){
 async function selectRole(roleKey){
   S.activeRole=roleKey;
   sessionStorage.setItem('knosk_s',JSON.stringify(S));
+  sessionStorage.setItem('knosk_active_role',roleKey);
   showPage('page-app');
   initApp();
 }
@@ -3183,7 +3228,6 @@ async function doRegister(){
   if(!name||!email||!pass||!role){err.style.display='block';err.textContent='Please fill all required fields.';return;}
   let subjects={};
   if(role==='teacher'){
-    // Collect selected subject chips
     document.querySelectorAll('#tsp-container .subject-chip.selected').forEach(chip=>{
       const cls=chip.dataset.class;
       const sub=chip.dataset.sub;
@@ -3191,29 +3235,39 @@ async function doRegister(){
       subjects[cls].push(sub);
     });
   }
-  const row={
-    id:uid(),name,email,password:pass,phone,role,gender,
-    subjects,
-    class:role==='student'?$('rg-class').value:'',
-    arm:role==='student'?($('rg-arm')?.value||'A'):'',
-    imageUrl:role==='student'?($('rg-img').value.trim()):'',
-    parentName:role==='student'?($('rg-parent').value.trim()):'',
-    parentPhone:role==='student'?($('rg-pphone').value.trim()):''
-  };
   err.style.display='none';
   const btn=$('rg-submit-btn');
   if(btn){btn.disabled=true;btn.textContent='Submitting...';}
-  // Registration happens before login exists, so it goes through the public
-  // 'register' backend action (not the authenticated 'write' action) —
-  // the server hashes the password, checks for duplicate emails, and
-  // notifies admins/cofounders of the new pending account.
-  const result = await safePost({action:'register', ...row});
-  if(btn){btn.disabled=false;btn.textContent='Create Account';}
-  if(!result?.success){
+  // signUp() creates the auth.users row; the handle_new_auth_user()
+  // trigger (see knosk_eyeq_schema.sql) auto-creates the matching
+  // profiles row with status='pending' from this metadata.
+  const {data,error}=await sb.auth.signUp({
+    email, password:pass,
+    options:{ data:{ name, role, phone } }
+  });
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Create Account';}
     err.style.display='block';
-    err.textContent=result?.error||'Registration failed. Please try again.';
+    err.textContent = /already registered|already exists/i.test(error.message) ? 'An account with this email already exists' : (error.message||'Registration failed. Please try again.');
     return;
   }
+  // Fill in the extra fields the signup trigger doesn't set.
+  if(data.user){
+    await sb.from('profiles').update({
+      gender, subjects,
+      class: role==='student' ? $('rg-class').value : null,
+      arm: role==='student' ? ($('rg-arm')?.value||'A') : null,
+      image_url: role==='student' ? $('rg-img').value.trim() : null,
+      parent_name: role==='student' ? $('rg-parent').value.trim() : null,
+      parent_phone: role==='student' ? $('rg-pphone').value.trim() : null,
+    }).eq('id', data.user.id);
+    // signUp() may leave an active session (depending on your
+    // Supabase project's email-confirmation setting) even though the
+    // account is 'pending' — sign back out so they must wait for
+    // approval, matching the old behavior exactly.
+    await sb.auth.signOut();
+  }
+  if(btn){btn.disabled=false;btn.textContent='Create Account';}
   toast('✅ Registration submitted! An admin will approve your account soon.');
   showLoginPage();
 }
@@ -5470,8 +5524,7 @@ async function runLegacyImport(){
 //  more than once before the dedup guard above existed). Groups rows
 //  by (sponsorId or sponsorName) + (studentId or studentName) +
 //  startDate, keeps the earliest createdAt in each group, deletes the
-//  rest. Requires the backend to support {action:'delete', sheet, id}
-//  — see the note on dbDelete() above.
+//  rest.
 // ════════════════════════════════════════════
 async function dedupeSponsorships(){
   const spon=await dbRead('Sponsorships');
@@ -5592,7 +5645,7 @@ async function repairMultiChildSponsorships(){
 const LEGACY_IMPORT_DATA = {"sponsorships":[{"sponsorName":"SAFE HANDS SCHOOL","sponsorEmail":"safehandsschools@gmail.com","startDate":"2024-10-30","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["SUNDAY MIRACLE CHINWEOTUTO"],"dataNote":null},{"sponsorName":"RITA McGILL","sponsorEmail":"robayojie@gmail.com","startDate":"2024-10-30","childrenCount":2,"committedAmount":480000.0,"paidAmount":320000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":0.667,"coveredUntil":"2025-06-30","computedStatus":"expired","children":["CHIMA JOSEPHINE","UMAR MOHAMMED SANUSI"],"dataNote":null},{"sponsorName":"OKECHUKWU ANEKE","sponsorEmail":"kene.aneke@gmail.com","startDate":"2023-08-06","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year (plan to extend to 6yrs)","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["GIDEON KENNETH","CATHERINE DUUTSAN"],"dataNote":null},{"sponsorName":"ANNIE","sponsorEmail":"aaquaisua@gmail.com","startDate":"2024-10-23","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.333,"coveredUntil":"2025-02-22","computedStatus":"expired","children":["ALEX JANE ENECHIOJO"],"dataNote":null},{"sponsorName":"ONYINYE OBIWE","sponsorEmail":"obiweonyinye@gmail.com","startDate":"2023-08-30","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until notified","yearsFunded":1.0,"coveredUntil":"2024-08-29","computedStatus":"expired","children":["EZE FLORENCE"],"dataNote":null},{"sponsorName":"NKIRU ONYEDIMAZU","sponsorEmail":"onyedimazu@yahoo.com","startDate":"2022-09-18","childrenCount":3,"committedAmount":594000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["CHUKWUMA MIRACLE","EZRA SHESHINBWA DIVINE","PETER GRACE"],"dataNote":"Marked 'Expired' in tracker"},{"sponsorName":"KEMI OKENYODO","sponsorEmail":"kokenyodo@partnersnigeria.org","startDate":"2022-12-10","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"Till child finishes school","yearsFunded":1.0,"coveredUntil":"2023-12-10","computedStatus":"expired","children":["AUDU PRISCILLIA","DIVINE CHIBUIKE","ODEY THANKGOD (Withdrawn)"],"dataNote":null},{"sponsorName":"OLAIDE OLADAYO","sponsorEmail":"dayo.olaide@gmail.com","startDate":"2023-02-01","childrenCount":3,"committedAmount":720000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["JOY YABO","JOHN FAVOUR","OLUWOLE GODWIN OLUWAGBENGA","OLUWOLE GODWIN GBENGA"],"dataNote":null},{"sponsorName":"FEMI KUTI","sponsorEmail":"oakutiea@gmail.com","startDate":"2021-10-02","childrenCount":6,"committedAmount":1440000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["EKECHUKWU IFENNA HENDRICK","ANIEKWE SOPURUCHUKWU","SANI BASHIR","SHAMSIYA MUSA","BENJAMIN PRECIOUS","ADELEKE OPEMIPO MATTHEW"],"dataNote":null},{"sponsorName":"MAX NIGERIA","sponsorEmail":"mary.orbih@maxdrive.ai","startDate":"2022-12-09","childrenCount":10,"committedAmount":2400000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ALI FAVOUR PHILEMON","HARUNA MAHMUD","ANDUMA MIRACLE","IDAGWU BLESSING","TERNENGE PERPETUAL","JOHN WISDOM","JOSEPH OREOFEOLUWA BLESSING","AMOS MIMIDOO","MICHAEL KELVIN","UGWUOKE VICTOR"],"dataNote":null},{"sponsorName":"LELA BLOSSOM (Mrs. Oduwusi Abiola)","sponsorEmail":"biosbank40@gmail.com","startDate":"2022-01-16","childrenCount":5,"committedAmount":990000.0,"paidAmount":null,"frequency":"Two Installments","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ABODUNRIN EMMANUEL","IHEAKAOZOR FRANKLIN","IKECHUKWU DIVINE","MUSBAUDEEN UTHMAN","UCHENDU EMMANUEL"],"dataNote":null},{"sponsorName":"JOE AKENOVA","sponsorEmail":"jeakenova@yahoo.com","startDate":"2023-11-25","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until graduation","yearsFunded":0.333,"coveredUntil":"2024-03-26","computedStatus":"expired","children":["EKECHUKWU KOSSIOCHUKWU VALENTINE"],"dataNote":null},{"sponsorName":"IRELAND EMBASSY","sponsorEmail":"inimfonetuk@gmail.com","startDate":"2020-09-16","childrenCount":3,"committedAmount":720000.0,"paidAmount":594000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.825,"coveredUntil":"2021-07-14","computedStatus":"expired","children":["BAKARE FARIDA","EKECHUKWU CHINONYE","JOSEPH DINATU"],"dataNote":null},{"sponsorName":"IAL FOUNDATION","sponsorEmail":"ialfoundation86@gmail.com","startDate":"2023-09-16","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["LINUS JOSHUA","LIGHT DEBORAH"],"dataNote":null},{"sponsorName":"ZAINAB SALEH","sponsorEmail":"hajiya.zainab.saleh@gmail.com","startDate":"2023-09-07","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["HUSSAINI HALIMAT"],"dataNote":null},{"sponsorName":"FOLUSADE SAMUEL","sponsorEmail":"samuelfolu9@gmail.com","startDate":"2024-09-20","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Year to year","yearsFunded":1.0,"coveredUntil":"2025-09-20","computedStatus":"expired","children":["WONDER SAMUEL"],"dataNote":null},{"sponsorName":"ESTHER ONAH","sponsorEmail":"estheronah2006@gmail.com","startDate":"2023-06-14","childrenCount":1,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["IDAGWU BLESSING"],"dataNote":null},{"sponsorName":"DUPE OLUSOLA","sponsorEmail":"dupekolusola@gmail.com","startDate":"2024-09-15","childrenCount":15,"committedAmount":3600000.0,"paidAmount":1200000.0,"frequency":null,"cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.333,"coveredUntil":"2025-01-15","computedStatus":"expired","children":["CHRISTIANA ENE ADAKOLE","EJIKE ONUNZE","EUNICE MAGA","IMOREME PEACE ETIOFAGENA","KARISSA THOMPSON","LATIFAT ABDULLAHI","MOHAMMED SULEIMAN AKOSHI","MOSES FAITH","NANA KHADIJAT ADAMU","NANA KHADIJAT SAIDU","NTENSIBAWAI DANJUMA","THANKGOD MUTARI","VICTORIA UHEMBA MUETOR","YUSUF ABDULMALIK ONIMISI","TIMOTHY OLUWAGA"],"dataNote":null},{"sponsorName":"UDOCHUKWU ORIZU","sponsorEmail":"uddyorizu@yahoo.com","startDate":"2023-02-09","childrenCount":1,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["OGHIE TIMOTHY (Withdrawn)"],"dataNote":"Sponsored student withdrawn, replacement pending"},{"sponsorName":"MERCY UMERI/JULIA","sponsorEmail":"mercyumeri@gmail.com","startDate":"2024-04-16","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["FAVOUR OYIRINBA","OKI PATRICIA"],"dataNote":null},{"sponsorName":"KOLE SHETTIMA","sponsorEmail":"kshettim@macfound.org","startDate":"2022-09-23","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ALI FAVOUR PHILEMON","ANDUMA MIRACLE"],"dataNote":null},{"sponsorName":"AISHA PEACE","sponsorEmail":"superintendent@icsabuja.education","startDate":"2024-09-13","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":1.0,"coveredUntil":"2025-09-13","computedStatus":"expired","children":["BETHEL JACOB"],"dataNote":null},{"sponsorName":"AFRIGLOBAL FOUNDATION","sponsorEmail":"maneesh@afriglobalonline.com","startDate":"2022-12-09","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2023-12-09","computedStatus":"expired","children":["CHIMAOGU DANIEL","ABDULHAMID JEMILA","IKWUEZE DANIEL","JOSEPH PATIENCE","KUVA MERIT","OGENYI MARTHA","SALAKO KOLADE","OGAH GODWIN","SUNDAY FAITH","KEHINDE OYINDAMOLA"],"dataNote":null},{"sponsorName":"ADETOKUNBO DOSUNMU","sponsorEmail":"tokunbo.dosunmu1@gmail.com","startDate":"2024-02-01","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["MOHAMMED ABDULBASIT","ONUNZE JESSICA"],"dataNote":null},{"sponsorName":"ABIMBOLA OLADUNJOYE","sponsorEmail":"bimbo_oladunjoye@yahoo.com","startDate":"2024-02-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"As long as God engraces me / through secondary school","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["EZEKIEL DIVINE"],"dataNote":null},{"sponsorName":"NGOAGWUANI NNEKA VICTORIA (Kamsivic)","sponsorEmail":"kamsivic@gmail.com","startDate":"2025-07-17","childrenCount":1,"committedAmount":100000.0,"paidAmount":50000.0,"frequency":"Bi-annual","cohort":"NEW","sponsorshipTerms":"100k = one academic session (1 year)","yearsFunded":0.208,"coveredUntil":"2025-10-01","computedStatus":"expired","children":["OCHIMANE PROMISE FRIDAY"],"dataNote":null},{"sponsorName":"SISTERS OF JOY FOUNDATION","sponsorEmail":"sistersofjoyfoundation@gmail.com","startDate":"2025-05-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":1.0,"coveredUntil":"2026-05-15","computedStatus":"expired","children":["ANIEKWE REJOICE"],"dataNote":null},{"sponsorName":"ADEOLA MUKAH","sponsorEmail":"adeolamukah17@gmail.com","startDate":"2025-09-06","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-09-06","computedStatus":"active","children":["KASIMU JAMES","UMMI AIMANA AMINU"],"dataNote":null},{"sponsorName":"ERIC LEKWA","sponsorEmail":"lekwaeric@yahoo.com","startDate":"2025-09-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":50000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":0.208,"coveredUntil":"2025-11-24","computedStatus":"expired","children":["ROTIMI PENIEL ONYINYE"],"dataNote":null},{"sponsorName":"OLUWASEUN ADEAGBO","sponsorEmail":"impactngng@gmail.com","startDate":"2025-08-29","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":0.333,"coveredUntil":"2025-12-29","computedStatus":"expired","children":["IMOSEMI FAITH TIJESUNI"],"dataNote":null},{"sponsorName":"ARCHIBONG MARY DIMIE","sponsorEmail":"marydimie2000@yahoo.co.uk","startDate":"2025-09-13","childrenCount":5,"committedAmount":1200000.0,"paidAmount":1300000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":1.083,"coveredUntil":"2026-10-13","computedStatus":"active","children":["ADAMU SALEH","CHRISTIANA DANTENI","ADEBAYO AKOREDE PRAISE","HASSAN SHERRIF DANIEL","ONUORA LUCIA NKIRUKA"],"dataNote":null},{"sponsorName":"RACHEL ADEGBE","sponsorEmail":"radegbe@gmail.com","startDate":"2023-02-21","childrenCount":1,"committedAmount":240000.0,"paidAmount":160000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":0.667,"coveredUntil":"2023-10-22","computedStatus":"expired","children":["LINUS DEBORAH UGOCHI"],"dataNote":null},{"sponsorName":"LEARNERS PURSE FOUNDATION","sponsorEmail":"info@learnerspursefoundation.org","startDate":"2025-09-29","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2026-09-29","computedStatus":"active","children":["JOSEPH MIRABEL GODIYA"],"dataNote":null},{"sponsorName":"BABATUNDE DAVID PETERS","sponsorEmail":"profpetos@petosscitech.net","startDate":"2025-10-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"Forever","yearsFunded":1.0,"coveredUntil":"2026-10-15","computedStatus":"active","children":["OSAYANDE PAUL"],"dataNote":null},{"sponsorName":"IRENE NWANNE","sponsorEmail":"Drirene94@gmail.com","startDate":"2025-10-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"Till she finishes school","yearsFunded":0.333,"coveredUntil":"2026-02-08","computedStatus":"expired","children":["NWAFOR OLIVIA NMASICHUKWU"],"dataNote":null},{"sponsorName":"NKECHI ADIMORA","sponsorEmail":"Nkechiadimora@gmail.com","startDate":"2025-01-20","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ZABRAN AMOS DIVINE","ISAAC SHEKWOLO"],"dataNote":"Source sheet lists 'total annual' as 240,000 (likely swapped/typo, corrected to 480,000 for 2 children)"},{"sponsorName":"JEDIDIAH CHIDIMMA","sponsorEmail":"chiddiesmiles@gmail.com","startDate":"2025-01-14","childrenCount":5,"committedAmount":1200000.0,"paidAmount":1350000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.125,"coveredUntil":"2026-03-01","computedStatus":"expired","children":["ILIYASU MUNIRAT","ODEY PHILIA (Withdrawn)","SANNI OMAYOZA FAITH","SUNDAY GIDALTI","IFEACHO DAVID","UMAR ABDULJABAR"],"dataNote":null},{"sponsorName":"CHIEF MRS OSASU/TOS FOUNDATION","sponsorEmail":"osasu360@gmail.com","startDate":"2025-11-06","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-06","computedStatus":"active","children":["BENJAMIN BLESSING (JSS1)","HUSSAINI MARYAM","HARUNA MARYAM","MISTURA BAKARE","PATIENCE GODWIN","DIVINE EDE","DAUDA KHADIJAT","EMMANUELLA OJOACHELE IDACHABA (JSS1)","VICTORY AUDU (JSS1)","TERNENGE TERDOO EUNICE (JSS1)"],"dataNote":null},{"sponsorName":"GOLDEN FRIENDS","sponsorEmail":"Lamitumaka@gmail.com","startDate":"2025-11-05","childrenCount":1,"committedAmount":240000.0,"paidAmount":360000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":1.5,"coveredUntil":"2027-05-07","computedStatus":"active","children":["ABDULLAHI ADAMU AMINA (JSS1)"],"dataNote":null},{"sponsorName":"OVIE AKPOVWA","sponsorEmail":"Ovieakpovwa@gmail.com","startDate":"2025-11-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-15","computedStatus":"active","children":["ALIYU AYNIL NAIMAT OWOWA (JSS1)"],"dataNote":null},{"sponsorName":"JIBOWU SHERIFAT BOLANLE","sponsorEmail":"sherrryjibowu@gmail.com","startDate":"2025-11-21","childrenCount":1,"committedAmount":180000.0,"paidAmount":null,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["CEPHAS ELIZABETH (JSS1)"],"dataNote":null},{"sponsorName":"AIRPEACE","sponsorEmail":"hawau.alege@flyairpeace.com","startDate":"2025-11-21","childrenCount":20,"committedAmount":4800000.0,"paidAmount":4800000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-21","computedStatus":"active","children":["PETER JOHANNA (JSS1)","SAMUEL GLORIA (JSS1)","DAVID ONYINYECHI ANNA (JSS1)","MUHAMMED IBRAHIM SANI (JSS1)","OLATUNJI COMFORT OLUWAFIKAYO (JSS1)","AHMAD ABDULWAHEED ADEKOYENI (JSS1)","HELEN MOSES ENEHEZEYI (JSS1)","KATURU ADAMU (JSS1)","FADEELAH ABDULLAHI (JSS1)","TERNENGE WUESETER GLORIA (JSS1)","IKECHUKWU DIVINE (SS2)","CHIBUIKE MIRACLE (SS2)","UGWUOKE FRANKLIN (SS2)","YUSUF ROFIAT (SS3)","ONMATA PATIENCE (SS3)","UDUEZE VIVIAN (SS3)","ADEDIRAN ZAINAB (SS3)","AUDU MICHAEL (SS3)","OBINNA CHISOM (SS3)","USMAN FATIMA (SS3)"],"dataNote":null},{"sponsorName":"DR SANMI ADEDOKUN","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["PRECIOUS AGU"],"dataNote":null},{"sponsorName":"MID POINT","sponsorEmail":"midpointinitiatives@gmail.com","startDate":null,"childrenCount":10,"committedAmount":3286400.0,"paidAmount":3286400.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["SUCCESS JOSEPH","PINE PASCAL","MSONTER JEROME MATHIAS","MADUABUCHI CHIAMAKA REJOICE","JUBRIN ZAINAB ABDULSALAM","INYENE FAVOUR IFUNANYACHUKWU","ANASTECIA SYLVESTER","ABUBAKAR SADIKA","ABDULLAHI AISHA USMAN","ABDULKARIM HARUNA IBRAHIM"],"dataNote":null},{"sponsorName":"DOVELAND","sponsorEmail":"dovelandcharityfoundation@gmail.com","startDate":"2026-01-01","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2027-01-01","computedStatus":"active","children":["Chukwuma Chimamanda Emmanuella","Destiny Uchechukwu","Umar Suleiman Ummusalma","Keren Manasseh","Jemimah Samuel Onyaole","Muhammad Bashir Iliyasu","Samsudeen Mohammed","Chukwuma Favour","Umar Fatimah","James Collins"],"dataNote":null},{"sponsorName":"Olaniyi Yusuf/Verraki","sponsorEmail":"olaniyi.yusuf@verraki.com","startDate":"2023-06-09","childrenCount":5,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["DANIEL NOAH","BENJAMIN JEREMIAH CHISOM","REJOICE KARIM","DAVID SAMUEL","ABDULLAHI ADAMU"],"dataNote":null},{"sponsorName":"Butterfly foundation","sponsorEmail":"info@butterflyfoundationforgirls.org","startDate":"2023-09-19","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2024-09-18","computedStatus":"expired","children":["DAUDA HOPE"],"dataNote":null},{"sponsorName":"OLUWASEYI OLUEBUBE OLUFEMI","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":40000.0,"paidAmount":40000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["WILLIAM MICHAEL"],"dataNote":null},{"sponsorName":"ICS","sponsorEmail":null,"startDate":"2024-09-13","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2025-09-13","computedStatus":"expired","children":["ANIEKWE CHIMAOBI MIRACLE","MICHAEL FAVOUR"],"dataNote":null},{"sponsorName":"NLNG Women","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":null,"cohort":"NEW","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["HAPPINESS OGHIE"],"dataNote":"Corrected: register lists a real child name (HAPPINESS OGHIE) here; a prior import mistakenly recorded it as unavailable."},{"sponsorName":"Mr Omoh Osobasi (Zion World)","sponsorEmail":null,"startDate":null,"childrenCount":10,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["JOSHUA SANASI YABO","OCHI KELECHI WISDOM","DOMINION ISIOMA","JAMES CHIDINMA","LADAN BEAUTY","PETER GRACE","AGBA GABRIEL","CHUKWUMA MIRACLE","NDUBISI GLORIA","KENNEDY UGWUOKE"],"dataNote":"Corrected: register lists 10 real child names here; a prior import mistakenly recorded them as unavailable. Some of these names also appear under other sponsors/pools (e.g. NKIRU ONYEDIMAZU, MAC ARTHUR) \u2014 same child, more than one sponsorship record, which is expected."},{"sponsorName":"MAC ARTHUR","sponsorEmail":null,"startDate":"2023-09-20","childrenCount":6,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_grant_amount_not_specified","children":["OLUWOLE KIND DAVID","OCHI KELECHI WISDOM","KEREN MANASSEH","JOSHUA SANASI YABO","HARUNA MAHMUD","BENJAMIN JEREMIAH CHISOM"],"dataNote":"Register lists 'Grant' instead of a \u20a6 amount for this row \u2014 no committed/paid figure is available, so amount fields are left blank pending admin confirmation. Was previously skipped entirely; re-added because 6 real child names ARE on file. Several of these children are also listed under other sponsors \u2014 same child, multiple sponsorship records, which is expected."}],"needsManualReview":[{"sponsor":"BUKKI SHONIBARE","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"Kimpact","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"HAMZA ADRIEL","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"FORD","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"MAC ARTHUR","reason":"Imported with its 6 real children, but the register shows 'Grant' instead of a \u20a6 amount \u2014 a System Admin should confirm and enter the actual committed/paid amount via Edit."}]};
 async function delUser(id,name){
   if(!confirm(`Deactivate "${name}"? They will no longer be able to log in, but their records are kept.`))return;
-  const result=await safePost({action:'deleteUser',userId:id});
+  const result=await dbUpdate('Users',id,{status:'suspended'});
   if(!result?.success){ toast(result?.error||'Could not deactivate user.','warn'); return; }
   toast('✅ User deactivated');
   loadAdminUsers();
@@ -5826,14 +5879,21 @@ async function notifyRoles(roles, {title, body, icon}, excludeUserId){
   const exclude=excludeUserId||S.id;
   _rememberSelfAction(title,body);
   try{
-    await safePost({action:'notify', roles, title, body, icon: icon||'🔔', excludeUserId: exclude, actorId:S.id});
+    const {data:targets}=await sb.from('profiles').select('id,role,additional_roles')
+      .in('role', roles).eq('status','active').is('deleted_at', null);
+    const rows=(targets||[])
+      .filter(u=>String(u.id)!==String(exclude))
+      .map(u=>({ user_id:u.id, actor_id:S.id, title, body, icon:icon||'🔔', read:false }));
+    if(rows.length) await sb.from('notifications').insert(rows);
   }catch(e){ console.warn('notifyRoles failed', e); }
 }
 async function notifyUserIds(userIds, {title, body, icon}, excludeUserId){
   const exclude=excludeUserId||S.id;
   if(exclude) _rememberSelfAction(title,body);
   try{
-    await safePost({action:'notify', userIds, title, body, icon: icon||'🔔', excludeUserId: exclude, actorId:S.id});
+    const rows=userIds.filter(id=>String(id)!==String(exclude))
+      .map(id=>({ user_id:id, actor_id:S.id, title, body, icon:icon||'🔔', read:false }));
+    if(rows.length) await sb.from('notifications').insert(rows);
   }catch(e){ console.warn('notifyUserIds failed', e); }
 }
 
@@ -5871,14 +5931,27 @@ async function loadNotifications(){
   renderNotifs();
 }
 
-// Poll for new notifications while the app is open, so admins/cofounders
-// see new registrations, submissions, etc. without needing to log out/in.
+// Realtime — new notifications for the logged-in user arrive within
+// ~1 second instead of waiting up to 12s for the next poll. This is
+// what actually makes the notification bell "live."
+let _notifRealtimeChannel=null;
+function startNotifRealtime(){
+  if(_notifRealtimeChannel || !S?.id) return;
+  _notifRealtimeChannel = sb.channel('notifications-'+S.id)
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'notifications', filter:`user_id=eq.${S.id}` },
+      ()=>{ loadNotifications(); })
+    .subscribe();
+}
+// Poll for new notifications while the app is open — now just a slow
+// fallback in case the realtime connection drops, not the primary path.
 function startNotifPolling(){
   if(_notifPoll) clearInterval(_notifPoll);
-  _notifPoll=setInterval(()=>{ loadNotifications(); }, 12000);
+  startNotifRealtime();
+  _notifPoll=setInterval(()=>{ loadNotifications(); }, 60000);
 }
 function stopNotifPolling(){
   if(_notifPoll){ clearInterval(_notifPoll); _notifPoll=null; }
+  if(_notifRealtimeChannel){ sb.removeChannel(_notifRealtimeChannel); _notifRealtimeChannel=null; }
 }
 
 function renderNotifs(){
@@ -6080,9 +6153,8 @@ async function sendAppEmail(){
     .map(u=>u.email);
   const allTo=[..._emailRecipients];
 
-  // ── FIX 1: Actually send the email via Gmail through the backend ──
-  const sendResult = await safePost({
-    action:'sendEmail',
+  // ── Send via Supabase Edge Function, then record in Emails ──
+  const sendResult = await sendEmailViaSupabase({
     toEmails: allTo,
     ccEmails,
     subject,
@@ -6090,7 +6162,6 @@ async function sendAppEmail(){
     senderName: S.name,
     senderId: S.id,
     senderEmail: S.email||'',
-    hasAttachment: !!$('email-attachment')?.files?.length,
   });
 
   if(sendResult?.error){
@@ -6098,9 +6169,6 @@ async function sendAppEmail(){
     return;
   }
 
-  // ── FIX 2: Also save to local Emails sheet for inbox tracking ──
-  // Backend already saves it via sendEmailViaGmail → writeRow,
-  // but we invalidate cache so inbox refreshes immediately
   _invalidate('Emails');
 
   // ── In-app notifications for registered recipients ──
@@ -7122,7 +7190,7 @@ async function sendPaymentNotification(){
   if(!email){msg.innerHTML='<div class="alert al-err">Recipient email required.</div>';return;}
   const typeLabels={reminder:'Payment Reminder',receipt:'Payment Receipt',overdue:'Overdue Notice',renewal:'Renewal Notice',allocation:'Student Allocation Update'};
   const body=`${typeLabels[type]||'Notification'}\n\nStudent: ${$('pn-student')?.value||'—'}\nAmount: ₦${Number($('pn-amount')?.value||0).toLocaleString()}\nDate: ${fmtDate($('pn-date')?.value)}\n\n${$('pn-message')?.value||''}\n\nKnosk EyeQ — N100 A Day Charity Secondary School`;
-  const result=await safePost({action:'sendEmail',toEmails:[email],ccEmails:[],subject:typeLabels[type]||'Knosk Payment Notification',body,senderName:S.name,senderRole:ROLES[S.role]?.label||S.role,senderId:S.id,senderEmail:S.email||''});
+  const result=await sendEmailViaSupabase({toEmails:[email],ccEmails:[],subject:typeLabels[type]||'Knosk Payment Notification',body,senderName:S.name,senderRole:ROLES[S.role]?.label||S.role,senderId:S.id,senderEmail:S.email||''});
   if(result?.error){msg.innerHTML=`<div class="alert al-err">❌ ${result.error}</div>`;return;}
   msg.innerHTML='<div class="alert al-ok">✅ Notification sent!</div>';
   toast('📢 Payment notification sent!');
@@ -7131,29 +7199,28 @@ async function sendPaymentNotification(){
 
 function doLogout(){
   if(confirm('Sign out of Knosk EyeQ?')){
-    if(_sessionToken){
-      fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({action:'logout',token:_sessionToken,userId:_sessionUserId})
-      }).catch(()=>{});
-    }
+    sb.auth.signOut().catch(()=>{});
     cleanupSession();
     showPage('page-login');
   }
 }
 
 // Shared cleanup used by manual logout, inactivity timeout, and
-// server-reported session expiry — keeps all three in perfect sync.
+// auth-state-change events — keeps all three in perfect sync.
 function cleanupSession(){
-  sessionStorage.removeItem('knosk_s');sessionStorage.removeItem('knosk_t');sessionStorage.removeItem('knosk_u');
-  _sessionToken=null;_sessionUserId=null;S={};
+  sessionStorage.removeItem('knosk_s');
+  sessionStorage.removeItem('knosk_active_role');
+  S={};
   if(_chatPoll)clearInterval(_chatPoll);
   if(_slidePoll)clearInterval(_slidePoll);
   stopNotifPolling();
+  if(_notifRealtimeChannel){ sb.removeChannel(_notifRealtimeChannel); _notifRealtimeChannel=null; }
   clearTimeout(_inactivityTimer);
 }
 
-// Server said the session is no longer valid (expired or logged in
-// elsewhere) — clean up and bounce to the login page.
+// Supabase reported the session is no longer valid (expired token,
+// or auth.signOut() fired from another tab) — clean up and bounce to
+// the login page.
 function forceLogout(message){
   toast(message,'warn');
   setTimeout(()=>{ cleanupSession(); showPage('page-login'); },1500);
@@ -7170,7 +7237,7 @@ function forceLogout(message){
 const INACTIVITY_LIMIT_MS = 15*60*1000;
 let _inactivityTimer=null;
 function resetInactivityTimer(){
-  if(!_sessionToken) return; // not logged in — nothing to time out
+  if(!S?.id) return; // not logged in — nothing to time out
   clearTimeout(_inactivityTimer);
   _inactivityTimer=setTimeout(()=>{
     cleanupSession();
@@ -7187,28 +7254,40 @@ document.addEventListener('DOMContentLoaded',()=>{
   // Safety net: if session-restore logic below hits an unexpected error,
   // don't leave the user staring at the loading spinner forever.
   const bootFallback=setTimeout(_bootRouteToLogin,6000);
-  try{
-    updateSoundToggleUI();
-    const saved=sessionStorage.getItem('knosk_s');
-    const savedToken=sessionStorage.getItem('knosk_t');
-    const savedUserId=sessionStorage.getItem('knosk_u');
-    if(savedToken){ _sessionToken=savedToken; _sessionUserId=savedUserId; }
-    // ⚡ Restore keep-alive and warm cache on page reload
-    if(savedToken){ startKeepAlive(); warmCache(); resetInactivityTimer(); }
-    let routed=false;
-    if(saved){
-      try{
-        const u=JSON.parse(saved);
-        if(u?.id){ S=u; routed=true; if(S.activeRole)selectRole(S.activeRole); else showWelcomePage(); }
-      }catch(e){}
+  (async()=>{
+    try{
+      updateSoundToggleUI();
+      const {data:{session}}=await sb.auth.getSession();
+      if(session?.user){
+        const {data:profile}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+        if(profile && profile.status==='active'){
+          S=_fromDbRow('Users',profile);
+          S.id=profile.id;
+          // Restore whichever role the person was last using, if any.
+          const cachedRoleChoice=sessionStorage.getItem('knosk_active_role');
+          if(cachedRoleChoice){ S.activeRole=cachedRoleChoice; }
+          sessionStorage.setItem('knosk_s',JSON.stringify(S));
+          warmCache(); resetInactivityTimer();
+          if(S.activeRole) selectRole(S.activeRole); else showWelcomePage();
+        } else {
+          await sb.auth.signOut();
+          showPage('page-login');
+        }
+      } else {
+        showPage('page-login'); // no valid session — go straight to login, no flash
+      }
+      clearTimeout(bootFallback);
+    }catch(err){
+      console.error('Boot/session-restore error:',err);
+      clearTimeout(bootFallback);
+      showPage('page-login');
     }
-    if(!routed) showPage('page-login'); // no valid session — go straight to login, no flash
-    clearTimeout(bootFallback);
-  }catch(err){
-    console.error('Boot/session-restore error:',err);
-    clearTimeout(bootFallback);
-    showPage('page-login');
-  }
+  })();
+  // Bounce to login automatically if Supabase invalidates the session
+  // elsewhere (token expiry, signed out in another tab, etc.)
+  sb.auth.onAuthStateChange((event)=>{
+    if(event==='SIGNED_OUT' && S?.id){ forceLogout('Session ended. Please sign in again.'); }
+  });
   document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 });
 // Populate assign-sponsor modal dropdowns
