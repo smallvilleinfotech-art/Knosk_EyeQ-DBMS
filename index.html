@@ -2337,6 +2337,69 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
   </div>
 </div>
 
+<!-- EDIT SPONSOR ENGAGEMENT (CRM/follow-up log) MODAL -->
+<div class="overlay" id="modal-edit-engagement">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('modal-edit-engagement')">✕</button>
+    <h2>📞 Engagement &amp; Follow-Up</h2><div class="modal-sub">Track contact history, payment status, and next steps for this sponsor.</div>
+    <div class="two-col">
+      <div class="fg"><label>Status</label><input type="text" id="eng-status" placeholder="e.g. Active, Expired, Completed sponsorship"></div>
+      <div class="fg"><label>Pay Status</label><input type="text" id="eng-pay-status" placeholder="e.g. Completed, or leave blank if outstanding"></div>
+      <div class="fg full"><label>Action Taken (contact/follow-up history)</label><textarea id="eng-action-taken" rows="4" placeholder="e.g. Emailed midterm result — no response. Sent invoice May 20."></textarea></div>
+      <div class="fg full"><label>Next Action</label><input type="text" id="eng-next-action" placeholder="e.g. Send end of term result, follow up with payment"></div>
+      <div class="fg full"><label>CTA (specific call-to-action)</label><input type="text" id="eng-cta" placeholder="e.g. Send Withdrawal Notification"></div>
+    </div>
+    <div id="edit-eng-msg"></div>
+    <div class="modal-acts"><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-engagement')">Cancel</button><button class="btn btn-blue btn-sm" onclick="saveEngagementEdit()">💾 Save</button></div>
+  </div>
+</div>
+
+<!-- EDIT STUDENT MODAL (System Admin only) -->
+<div class="overlay" id="modal-edit-student">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('modal-edit-student')">✕</button>
+    <h2>✏️ Edit Student</h2><div class="modal-sub">System Admin correction tool — fix inaccurate fields and save.</div>
+    <div class="two-col">
+      <div class="fg"><label>Full Name</label><input type="text" id="est-name"></div>
+      <div class="fg"><label>Status</label>
+        <select id="est-status">
+          <option value="active">Active</option>
+          <option value="pending">Pending</option>
+          <option value="suspended">Suspended</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+      <div class="fg"><label>Class</label><input type="text" id="est-class" placeholder="e.g. JSS1"></div>
+      <div class="fg"><label>Arm</label><input type="text" id="est-arm" placeholder="e.g. A"></div>
+      <div class="fg"><label>Gender</label>
+        <select id="est-gender"><option value="M">Male</option><option value="F">Female</option></select>
+      </div>
+      <div class="fg"><label>Score (points)</label><input type="number" id="est-points"></div>
+      <div class="fg"><label>Attendance %</label><input type="number" id="est-attendance" min="0" max="100"></div>
+      <div class="fg"><label>Parent/Guardian Name</label><input type="text" id="est-parent-name"></div>
+      <div class="fg full"><label>Parent Phone</label><input type="text" id="est-parent-phone"></div>
+    </div>
+    <div id="edit-student-msg"></div>
+    <div class="modal-acts"><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-student')">Cancel</button><button class="btn btn-blue btn-sm" onclick="saveStudentEdit()">💾 Save Changes</button></div>
+  </div>
+</div>
+
+<!-- EDIT PROFILE MODAL (System Admin only) -->
+<div class="overlay" id="modal-edit-profile">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('modal-edit-profile')">✕</button>
+    <h2>✏️ Edit Profile</h2><div class="modal-sub">Correct a name, email, phone, or sponsor type — e.g. replacing a placeholder email from a bulk import.</div>
+    <div class="two-col">
+      <div class="fg full"><label>Full Name</label><input type="text" id="epf-name"></div>
+      <div class="fg"><label>Email</label><input type="email" id="epf-email"></div>
+      <div class="fg"><label>Phone</label><input type="text" id="epf-phone"></div>
+      <div class="fg full"><label>Sponsor Type / Cohort</label><input type="text" id="epf-sponsor-type" placeholder="e.g. OLD, NEW"></div>
+    </div>
+    <div id="edit-profile-msg"></div>
+    <div class="modal-acts"><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-profile')">Cancel</button><button class="btn btn-blue btn-sm" onclick="saveProfileEdit()">💾 Save Changes</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="modal-bulk-import">
   <div class="modal modal-lg">
     <button class="modal-close-btn" onclick="closeModal('modal-bulk-import')">✕</button>
@@ -2741,6 +2804,7 @@ const SHEET_TABLE_MAP = {
   ExerciseScores:'exercise_scores', Settings:'settings',
   Announcements:'announcements', ActivityLog:'activity_log',
   Meetings:'meetings', ExamPrograms:'exam_programs',
+  SponsorEngagement:'sponsor_engagement',
 };
 
 // ── FIELD NAME TRANSLATION (camelCase JS ↔ snake_case Postgres) ──
@@ -2753,11 +2817,13 @@ function _snakeToCamel(k){ return k.replace(/_([a-z0-9])/g,(_,c)=>c.toUpperCase(
 const SHEET_FIELD_OVERRIDES = {
   Sponsorships: { amount:'annual_amount', committedAmount:'committed_amount',
     paidAmount:'paid_amount', sponsorshipType:'cohort' },
+  SponsorEngagement: { statusLabel:'status_label' },
 };
 // Fields that exist on the JS object but are DERIVED via a join
 // (not real columns) — stripped before writing, attached after reading.
 const SHEET_DERIVED_FIELDS = {
   Sponsorships: ['studentName','sponsorName'],
+  SponsorEngagement: ['sponsorName'],
 };
 // Fields the old sheets carried that have no column in the new schema
 // (either unused, or superseded — e.g. importedAt ≈ createdAt).
@@ -2792,6 +2858,9 @@ function _fromDbRow(sheet, row){
     if (row.students) out.studentName = row.students.name;
     if (row.profiles)  out.sponsorName = row.profiles.name;
   }
+  if (sheet==='SponsorEngagement' && row.profiles){
+    out.sponsorName = row.profiles.name;
+  }
   return out;
 }
 
@@ -2799,10 +2868,12 @@ function _fromDbRow(sheet, row){
 async function _supaSelect(sheet){
   const table = SHEET_TABLE_MAP[sheet];
   let query = sb.from(table).select(
-    sheet==='Sponsorships' ? '*, students(name), profiles(name)' : '*'
+    sheet==='Sponsorships' ? '*, students(name), profiles(name)'
+    : sheet==='SponsorEngagement' ? '*, profiles(name)'
+    : '*'
   );
-  // Every table except settings/activity_log uses soft-delete.
-  if (!['settings','activity_log'].includes(table)) query = query.is('deleted_at', null);
+  // Every table except settings/activity_log/sponsor_engagement uses soft-delete.
+  if (!['settings','activity_log','sponsor_engagement'].includes(table)) query = query.is('deleted_at', null);
   const { data, error } = await query;
   if (error){ console.error('[supabase read]', table, error.message); return []; }
   return (data||[]).map(r=>_fromDbRow(sheet, r));
@@ -2818,7 +2889,7 @@ const _cache = {};
 const _pending = {};
 const CACHE_TTL = 90000;
 const CACHE_STALE = 15000;
-const VOLATILE_SHEETS = ['Messages','Notifications','ActivityLog','Emails','Sponsorships'];
+const VOLATILE_SHEETS = ['Messages','Notifications','ActivityLog','Emails','Sponsorships','SponsorEngagement'];
 const STABLE_SHEETS   = ['Users','Programs','ExamPrograms','Settings'];
 
 function _ttl(sheet) {
@@ -2950,6 +3021,7 @@ function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx
 // (as opposed to knosk_programs, teacher, student, sponsor, etc. who
 // should never see edit/delete controls on other people's data).
 function isSystemAdmin(){ const r=S.activeRole||S.role; return r==='admin'||r==='knosk_admin'; }
+function isSponsorshipStaff(){ const r=S.activeRole||S.role; return r==='admin'||r==='knosk_admin'||r==='cofounder'||r==='child_sponsorship'; }
 function gi(n){if(!n)return'?';const p=n.trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();}
 function today(){return new Date().toISOString().slice(0,10);}
 function fmtDate(d){if(!d)return'—';try{return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}catch{return d;}}
@@ -3053,7 +3125,7 @@ async function doLogin(){
     err.textContent = /invalid/i.test(error.message) ? 'Invalid email or password' : 'Login failed. Please check your credentials.';
     return;
   }
-  const {data:profile,error:profErr}=await sb.from('profiles').select('*').eq('id',data.user.id).single();
+  const {data:profile,error:profErr}=await sb.from('profiles').select('*').eq('auth_user_id',data.user.id).single();
   if(profErr || !profile){
     await sb.auth.signOut();
     err.style.display='block'; err.textContent='Could not load your account profile. Contact an admin.'; return;
@@ -3261,7 +3333,7 @@ async function doRegister(){
       image_url: role==='student' ? $('rg-img').value.trim() : null,
       parent_name: role==='student' ? $('rg-parent').value.trim() : null,
       parent_phone: role==='student' ? $('rg-pphone').value.trim() : null,
-    }).eq('id', data.user.id);
+    }).eq('auth_user_id', data.user.id);
     // signUp() may leave an active session (depending on your
     // Supabase project's email-confirmation setting) even though the
     // account is 'pending' — sign back out so they must wait for
@@ -4171,14 +4243,66 @@ function renderStudentsTable(students,sponsored,pendingSponsored){
         ${s.status==='pending'&&['admin','knosk_admin','teacher'].includes(role)?`
           <button class="btn btn-xs btn-outline-blue" onclick="editStudentBeforeApprove('${s.id}')" title="Edit details then approve">✏️ Edit</button>
           <button class="btn btn-xs btn-green" onclick="approveStudent('${s.id}')">✓ Approve</button>
-        `:''}
-        <button class="btn btn-xs btn-ghost" onclick="alert('Student: ${s.name}\\nClass: ${s.class}\\nGender: ${s.gender}\\nAttendance: ${s.attendancePct||0}%\\nScore: ${s.points||0}pts')">View</button>
+        `:isSystemAdmin()?`
+          <button class="btn btn-xs btn-outline-blue" onclick='openEditStudentModal(${JSON.stringify(s).replace(/'/g,"&#39;")})'>✏️ Edit</button>
+          <button class="btn btn-xs btn-red" onclick="deleteStudentRecord('${s.id}','${(s.name||'').replace(/'/g,"&#39;")}')">🗑️</button>
+        `:`<button class="btn btn-xs btn-ghost" onclick="alert('Student: ${s.name}\\nClass: ${s.class}\\nGender: ${s.gender}\\nAttendance: ${s.attendancePct||0}%\\nScore: ${s.points||0}pts')">View</button>`}
       </div></td>
     </tr>`;
   }).join('')||'<tr><td colspan="8"><div class="empty"><div class="empty-icon">🎓</div><p>No students found</p></div></td></tr>';
 }
 
-// ── Programs role: Students = enrollment & participation ──
+// ════════════════════════════════════════════
+//  GENERAL STUDENT EDIT/DELETE (System Admin) — any status, not just
+//  pending. Complements editStudentBeforeApprove which only covers
+//  the pre-approval flow.
+// ════════════════════════════════════════════
+let _editingStudentId=null;
+function openEditStudentModal(s){
+  if(!isSystemAdmin()){ toast('Only a System Admin can edit student records.','warn'); return; }
+  _editingStudentId=s.id;
+  $('est-name').value=s.name||'';
+  $('est-class').value=s.class||'';
+  $('est-arm').value=s.arm||'';
+  $('est-gender').value=s.gender||'';
+  $('est-status').value=s.status||'pending';
+  $('est-points').value=s.points||0;
+  $('est-attendance').value=s.attendancePct||100;
+  $('est-parent-name').value=s.parentName||'';
+  $('est-parent-phone').value=s.parentPhone||'';
+  $('edit-student-msg').innerHTML='';
+  openModal('modal-edit-student');
+}
+async function saveStudentEdit(){
+  const updates={
+    name:$('est-name').value.trim(),
+    class:$('est-class').value.trim(),
+    arm:$('est-arm').value.trim(),
+    gender:$('est-gender').value,
+    status:$('est-status').value,
+    points:Number($('est-points').value||0),
+    attendancePct:Number($('est-attendance').value||0),
+    parentName:$('est-parent-name').value.trim(),
+    parentPhone:$('est-parent-phone').value.trim(),
+    editedBy:S.name, editedAt:new Date().toISOString(),
+  };
+  const result=await dbUpdate('Students',_editingStudentId,updates);
+  const msg=$('edit-student-msg');
+  if(!result?.success){ msg.innerHTML=`<div class="alert al-err">${result?.error||'Could not save.'}</div>`; return; }
+  msg.innerHTML='<div class="alert al-ok">✅ Saved.</div>';
+  toast('✅ Student record updated');
+  setTimeout(()=>{closeModal('modal-edit-student');loadStudentsView();},700);
+}
+async function deleteStudentRecord(id,name){
+  if(!isSystemAdmin()){ toast('Only a System Admin can delete student records.','warn'); return; }
+  if(!confirm(`Delete "${name}"? This also removes their sponsorship history. This cannot be undone.`))return;
+  const result=await dbDelete('Students',id);
+  if(result?.error){ toast(result.error,'warn'); return; }
+  toast('🗑️ Student record deleted');
+  loadStudentsView();
+}
+
+
 async function loadStudentsForPrograms(){
   const [students,progs]=await Promise.all([dbRead('Students'),dbRead('Programs')]);
   const active=progs.filter(p=>p.status==='active');
@@ -4856,10 +4980,19 @@ async function viewSponsorDetail(sponsorId){
   const spon=await dbRead('Sponsorships');
   const users=await dbRead('Users');
   const students=await dbRead('Students');
+  const engagement=(await dbRead('SponsorEngagement')).find(e=>e.sponsorId===sponsorId);
   const theirSpon=spon.filter(s=>s.sponsorId===sponsorId);
   const sponsorUser=users.find(u=>u.id===sponsorId)||{name:theirSpon[0]?.sponsorName||'—',email:'—'};
   const totalAnnual=theirSpon.reduce((a,s)=>a+Number(s.amount||0),0);
   const monthlyEquivalent=Math.round(totalAnnual/12);
+  const activeCount=theirSpon.filter(s=>s.status==='active').length;
+  const pendingCount=theirSpon.filter(s=>s.status==='pending').length;
+  const elapsedCount=theirSpon.filter(s=>s.status==='active'&&getRenewalDays(s)!==null&&getRenewalDays(s)<0).length;
+  const headerBadge = elapsedCount>0
+    ? `<span class="badge b-renewal-spon">🔴 ${elapsedCount} Needs Renewal</span>`
+    : activeCount>0 ? `<span class="badge b-active">✅ Active Sponsor</span>`
+    : pendingCount>0 ? `<span class="badge b-pending-spon">⏳ Pending</span>`
+    : `<span class="badge b-inactive">Inactive</span>`;
   const html=`
     <div class="sponsor-detail-card">
       <div class="sdc-header">
@@ -4868,7 +5001,7 @@ async function viewSponsorDetail(sponsorId){
           <div class="sdc-name">${sponsorUser.name}</div>
           <div class="sdc-meta">📧 ${sponsorUser.email||'—'} · 📞 ${sponsorUser.phone||'—'}</div>
         </div>
-        <div style="margin-left:auto;"><span class="badge b-active">Active Sponsor</span></div>
+        <div style="margin-left:auto;">${headerBadge}</div>
       </div>
       <div class="sdc-stats">
         <div class="sdc-stat"><div class="sdc-num">${theirSpon.length}</div><div class="sdc-lbl">Students Sponsored</div></div>
@@ -4877,23 +5010,43 @@ async function viewSponsorDetail(sponsorId){
         <div class="sdc-stat"><div class="sdc-num">${fmtDate(theirSpon[0]?.startDate)||'—'}</div><div class="sdc-lbl">First Sponsorship</div></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card" style="margin-top:14px;">
+      <div class="card-header">
+        <div class="card-title">📞 Engagement &amp; Follow-Up</div>
+        ${isSponsorshipStaff()?`<button class="btn btn-xs btn-ghost" onclick='openEditEngagement("${sponsorId}",${JSON.stringify(engagement||{}).replace(/'/g,"&#39;")})'>✏️ Edit</button>`:''}
+      </div>
+      <div class="card-body" style="font-size:13px;line-height:1.7;">
+        ${engagement?`
+          <div style="margin-bottom:8px;"><strong>Status:</strong> ${engagement.statusLabel||'—'}</div>
+          <div style="margin-bottom:8px;"><strong>Pay Status:</strong> ${engagement.payStatus||'Outstanding / unconfirmed'}</div>
+          <div style="margin-bottom:8px;"><strong>Action Taken:</strong><br><span style="white-space:pre-wrap;color:var(--muted);">${(engagement.actionTaken||'—').replace(/</g,'&lt;')}</span></div>
+          <div style="margin-bottom:8px;"><strong>Next Action:</strong> ${engagement.nextAction||'—'}</div>
+          ${engagement.cta?`<div><span class="badge b-gold">📌 ${engagement.cta}</span></div>`:''}
+        `:'<div class="empty"><p>No engagement log yet for this sponsor.</p></div>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px;">
       <div class="card-header"><div class="card-title">📋 Sponsorship Track Record</div><span class="badge b-blue">${theirSpon.length} records</span></div>
       <div class="data-table-wrap">
         <table class="data-table">
-          <thead><tr><th>#</th><th>Student Name</th><th>Class</th><th>Start Date</th><th>Term</th><th>Session</th><th>Monthly (₦)</th><th>Status</th><th>Performance</th><th>Attendance</th>${isSystemAdmin()?'<th>Actions</th>':''}</tr></thead>
+          <thead><tr><th>#</th><th>Student Name</th><th>Class</th><th>Start Date</th><th>End Date</th><th>Renewal</th><th>Annual (₦)</th><th>Status</th><th>Performance</th><th>Attendance</th>${isSystemAdmin()?'<th>Actions</th>':''}</tr></thead>
           <tbody>
             ${theirSpon.map((sp,i)=>{
               const st=students.find(s=>s.id===sp.studentId)||{};
+              const days=getRenewalDays(sp);
+              const renewalCell = !sp.endDate ? '<span style="color:var(--muted);">Ongoing</span>'
+                : days<0 ? `<span style="color:var(--red);font-weight:700;">Elapsed ${Math.abs(days)}d ago</span>`
+                : days<=30 ? `<span style="color:var(--gold-dark);font-weight:700;">${days}d left</span>`
+                : `${days}d left`;
               return`<tr>
                 <td>${i+1}</td>
                 <td><strong>${sp.studentName||'—'}</strong></td>
                 <td><span class="badge b-blue">${st.class||sp.class||'—'}</span></td>
                 <td>${fmtDate(sp.startDate)}</td>
-                <td>${sp.term||'—'}</td>
-                <td>${sp.session||'—'}</td>
+                <td>${sp.endDate?fmtDate(sp.endDate):'—'}</td>
+                <td>${renewalCell}</td>
                 <td><strong>₦${Number(sp.amount||0).toLocaleString()}</strong></td>
-                <td><span class="badge ${sp.status==='active'?'b-active':'b-inactive'}">${sp.status}</span></td>
+                <td><span class="badge ${sp.status==='active'?'b-active':sp.status==='pending'?'b-pending':'b-inactive'}">${sp.status}</span></td>
                 <td>${st.points||sp.performanceAvg||'—'}${st.points?'pts':''}</td>
                 <td>${st.attendancePct||sp.attendanceDays||'—'}${st.attendancePct?'%':''}</td>
                 ${isSystemAdmin()?`<td style="white-space:nowrap;"><button class="btn btn-xs btn-ghost" onclick='openEditSponsorship(${JSON.stringify(sp).replace(/'/g,"&#39;")})'>✏️ Edit</button> <button class="btn btn-xs btn-red" onclick="deleteSponsorshipRecord('${sp.id}','${(sp.studentName||'').replace(/'/g,"&#39;")}')">🗑️</button></td>`:''}
@@ -4990,6 +5143,45 @@ async function deleteSponsorshipRecord(id,name){
     const match=spon.find(s=>s.studentName===name);
     if(match)viewSponsorDetail(match.sponsorId);
   }
+}
+
+// ════════════════════════════════════════════
+//  SPONSOR ENGAGEMENT (CRM / follow-up log) — edit
+// ════════════════════════════════════════════
+let _editingEngagementSponsorId=null,_editingEngagementId=null;
+function openEditEngagement(sponsorId,engagement){
+  if(!isSponsorshipStaff()){ toast('Only sponsorship staff can edit engagement notes.','warn'); return; }
+  _editingEngagementSponsorId=sponsorId;
+  _editingEngagementId=engagement?.id||null;
+  $('eng-status').value=engagement?.statusLabel||'';
+  $('eng-pay-status').value=engagement?.payStatus||'';
+  $('eng-action-taken').value=engagement?.actionTaken||'';
+  $('eng-next-action').value=engagement?.nextAction||'';
+  $('eng-cta').value=engagement?.cta||'';
+  $('edit-eng-msg').innerHTML='';
+  openModal('modal-edit-engagement');
+}
+async function saveEngagementEdit(){
+  const updates={
+    statusLabel:$('eng-status').value.trim(),
+    payStatus:$('eng-pay-status').value.trim(),
+    actionTaken:$('eng-action-taken').value.trim(),
+    nextAction:$('eng-next-action').value.trim(),
+    cta:$('eng-cta').value.trim(),
+    updatedBy:S.id,
+  };
+  const msg=$('edit-eng-msg');
+  let result;
+  if(_editingEngagementId){
+    result=await dbUpdate('SponsorEngagement',_editingEngagementId,updates);
+  }else{
+    const id=uid();
+    result=await dbWrite('SponsorEngagement',{id,sponsorId:_editingEngagementSponsorId,...updates});
+  }
+  if(!result?.success){ msg.innerHTML=`<div class="alert al-err">${result?.error||'Could not save.'}</div>`; return; }
+  msg.innerHTML='<div class="alert al-ok">✅ Saved.</div>';
+  toast('✅ Engagement notes updated');
+  setTimeout(()=>{closeModal('modal-edit-engagement');viewSponsorDetail(_editingEngagementSponsorId);},700);
 }
 
 // ════════════════════════════════════════════
@@ -5341,6 +5533,7 @@ async function loadAdminUsers(){
     <td style="font-size:12px;color:var(--muted);">${fmtDate(u.joinedAt)}</td>
     <td><div style="display:flex;gap:5px;flex-wrap:wrap;">
       ${u.status==='pending'?`<button class="btn btn-xs btn-green" onclick="approveUser('${u.id}')">✓</button>`:''}
+      <button class="btn btn-xs btn-ghost" onclick='openEditProfileModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>✏️ Edit Profile</button>
       <button class="btn btn-xs btn-ghost" onclick="openEditRoleModal('${u.id}')">Edit Role</button>
       ${u.role!=='admin'?`<button class="btn btn-xs btn-red" onclick="delUser('${u.id}','${u.name}')">Deactivate</button>`:''}
     </div></td>
@@ -5403,7 +5596,7 @@ async function runLegacyImport(){
     alert('LEGACY_IMPORT_DATA is empty.');
     return;
   }
-  if(!confirm(`This will create ${LEGACY_IMPORT_DATA.sponsorships.length} sponsorship record(s), plus a PENDING profile for every sponsor and student named in the register who doesn't already exist. Nothing goes live until you click Bulk-Approve. Continue?`))return;
+  if(!confirm(`This will create ${LEGACY_IMPORT_DATA.sponsorships.length} sponsorship record(s) with real tracked status (active/pending/inactive), plus a profile for every sponsor and student named in the register who doesn't already exist. New people are created 'pending' until Bulk-Approve; sponsorship status itself reflects your actual tracker. Continue?`))return;
 
   const statusEl=$('bulk-action-status');
   if(statusEl)statusEl.textContent='Importing…';
@@ -5419,15 +5612,36 @@ async function runLegacyImport(){
   const studentByKey={};
   existingStudents.forEach(s=>{if(s.name)studentByKey[_nameKey(s.name)]=s;});
   // Dedup guard — one Sponsorships row should exist per (sponsor, student)
-  // pair. Without this, clicking "Import Sponsorship Register" more than
-  // once (or leaving old single-child-per-row imports in place) creates
-  // duplicate records, which is exactly what happened to e.g. Sunday
-  // Miracle Chinweotuto showing 4 identical records instead of 1.
+  // pair. Without this, re-running the import creates duplicate records.
   const existingPairKeys=new Set(
     existingSponships.map(s=>String(s.sponsorId)+'::'+String(s.studentId))
   );
+  const existingEngagement=await dbRead('SponsorEngagement');
+  const engagementSponsorIds=new Set(existingEngagement.map(e=>String(e.sponsorId)));
 
-  let sponsorsCreated=0,studentsCreated=0,sponsorshipsCreated=0,duplicatesSkipped=0,skipped=0;
+  // "3 years" / "One year" / "6 years" -> a real end_date, so the
+  // Sponsorship Overview can show real days-remaining/elapsed instead
+  // of nothing. Ambiguous terms ("Forever","Until graduation","As long
+  // as...") are deliberately left with no end date (ongoing/indefinite).
+  function computeEndDate(startDate, termsText){
+    if(!startDate||!termsText)return null;
+    const t=String(termsText).toLowerCase();
+    const wordNums={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
+    let years=null;
+    const numMatch=t.match(/(\d+)\s*year/);
+    if(numMatch)years=Number(numMatch[1]);
+    else{
+      const wordMatch=t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\s*years?\b/);
+      if(wordMatch)years=wordNums[wordMatch[1]];
+    }
+    if(!years)return null;
+    const d=new Date(startDate);
+    if(isNaN(d.getTime()))return null;
+    d.setFullYear(d.getFullYear()+years);
+    return d.toISOString().slice(0,10);
+  }
+
+  let sponsorsCreated=0,studentsCreated=0,sponsorshipsCreated=0,duplicatesSkipped=0,skipped=0,engagementRecorded=0;
   const problems=[];
 
   for(const rec of LEGACY_IMPORT_DATA.sponsorships){
@@ -5447,7 +5661,21 @@ async function runLegacyImport(){
         sponsorsCreated++;
       }
 
-      // ---- Students (pending) ----
+      // ---- Sponsor engagement log (status/action taken/pay status/next action/CTA) ----
+      if((rec.rawStatusLabel||rec.actionTaken||rec.payStatus||rec.nextAction||rec.cta) && !engagementSponsorIds.has(String(sponsorId))){
+        await dbWrite('SponsorEngagement',{
+          id:uid(), sponsorId,
+          statusLabel:rec.rawStatusLabel||null,
+          actionTaken:rec.actionTaken||null,
+          payStatus:rec.payStatus||null,
+          nextAction:rec.nextAction||null,
+          cta:rec.cta||null,
+        });
+        engagementSponsorIds.add(String(sponsorId));
+        engagementRecorded++;
+      }
+
+      // ---- Students + their own linked profile (pending) ----
       const childrenNames=Array.isArray(rec.children)?rec.children:[];
       const studentIds=[];
       for(const rawName of childrenNames){
@@ -5456,24 +5684,26 @@ async function runLegacyImport(){
         const key=_nameKey(cleanName);
         if(studentByKey[key]){studentIds.push(studentByKey[key].id);continue;}
         const studentId=uid();
-        await dbWrite('Students',{id:studentId,name:cleanName,class:'',arm:'',gender:'',status:'pending',points:0,attendancePct:100,joinedAt:new Date().toISOString(),assignReason:'Bulk legacy import from sponsorship register'});
-        await dbWrite('Users',{id:studentId,name:cleanName,email:'',role:'student',status:'pending',phone:'',points:0,joinedAt:new Date().toISOString(),inviteMethod:'bulk_legacy_import'});
+        const studentProfileId=uid(); // separate id — students.profile_id links to it, they're not the same row
+        await dbWrite('Students',{id:studentId,profileId:studentProfileId,name:cleanName,class:'',arm:'',gender:'',status:'pending',points:0,attendancePct:100,joinedAt:new Date().toISOString(),assignReason:'Bulk legacy import from sponsorship register'});
+        await dbWrite('Users',{id:studentProfileId,name:cleanName,email:'',role:'student',status:'pending',phone:'',points:0,joinedAt:new Date().toISOString(),inviteMethod:'bulk_legacy_import'});
         studentByKey[key]={id:studentId,name:cleanName};
         studentIds.push(studentId);
         studentsCreated++;
       }
 
-      // ---- One Sponsorship record PER CHILD (not one row per sponsor
-      // with all child IDs joined into a string — that broke every
-      // studentId===s.id match used elsewhere in the app, e.g. in
-      // renderSponStudents/filterSponStudents/renderAtRisk, so any
-      // sponsor with 2+ children never showed as "sponsored" on their
-      // children's profiles). The committed/paid amount is split evenly
-      // across the children so per-sponsor totals still reconcile. ----
-      const computed=computeFundedStatus(rec);
+      // ---- One Sponsorship record PER CHILD, with REAL tracked status ----
       const childCount=studentIds.length||1;
-      const amountEach=Math.round((Number(rec.paidAmount||rec.committedAmount||0))/childCount);
-      const committedEach=Math.round((Number(rec.committedAmount||0))/childCount);
+      const baseAmount=Number(rec.committedAmount??rec.totalAnnual??0);
+      const amountEach=Math.round(baseAmount/childCount);
+      const committedEach=amountEach;
+      const paidEach=rec.paidAmount!=null?Math.round(Number(rec.paidAmount)/childCount):null;
+      const endDate=computeEndDate(rec.startDate,rec.sponsorshipTerms);
+      // engagementStatus is the source of truth for sponsorships.status —
+      // it's your own tracked Active/Expired/Completed data, which is far
+      // more reliable than guessing from payment-vs-time math alone.
+      const status=rec.engagementStatus||'pending';
+
       for(const sid of studentIds){
         const pairKey=String(sponsorId)+'::'+String(sid);
         if(existingPairKeys.has(pairKey)){ duplicatesSkipped++; continue; }
@@ -5484,21 +5714,19 @@ async function runLegacyImport(){
           studentName:stu?.name||'—',
           sponsorId,
           sponsorName:rec.sponsorName,
-          status:'pending',
-          fundedStatus:computed.status,
+          status,
           amount:amountEach,
           committedAmount:committedEach,
+          paidAmount:paidEach,
           childrenCount:rec.childrenCount||childrenNames.length,
           sponsorshipType:rec.cohort||'',
           startDate:rec.startDate||'',
-          coveredUntil:computed.coveredUntil||'',
-          yearsFunded:computed.yearsFunded||'',
+          endDate:endDate||'',
           frequency:rec.frequency||'',
           term:'',session:'',
           notes:[rec.sponsorshipTerms,rec.dataNote].filter(Boolean).join(' | '),
           inviteMethod:'bulk_legacy_import',
           importBatchKey:pairKey,
-          importedAt:new Date().toISOString(),
           createdAt:new Date().toISOString(),
         });
         existingPairKeys.add(pairKey);
@@ -5509,13 +5737,14 @@ async function runLegacyImport(){
     }
   }
 
-  const msg=`Done: ${sponsorsCreated} sponsor(s), ${studentsCreated} student(s), ${sponsorshipsCreated} sponsorship record(s) created${duplicatesSkipped?`, ${duplicatesSkipped} duplicate(s) skipped (already imported)`:''} — all pending approval.`;
+  const msg=`Done: ${sponsorsCreated} sponsor(s), ${studentsCreated} student(s), ${sponsorshipsCreated} sponsorship record(s), ${engagementRecorded} engagement log(s)${duplicatesSkipped?`, ${duplicatesSkipped} duplicate(s) skipped`:''}.`;
   if(statusEl)statusEl.textContent=msg+(problems.length?` (${problems.length} issue(s), see console.)`:'');
   if(problems.length)console.warn('Import issues:',problems);
   if(LEGACY_IMPORT_DATA.needsManualReview&&LEGACY_IMPORT_DATA.needsManualReview.length){
     console.info('Skipped — needs manual entry:',LEGACY_IMPORT_DATA.needsManualReview);
   }
-  toast(duplicatesSkipped?`📥 Import complete — ${sponsorshipsCreated} new, ${duplicatesSkipped} duplicates skipped`:'📥 Legacy import complete — pending approval');
+  toast(duplicatesSkipped?`📥 Import complete — ${sponsorshipsCreated} new, ${duplicatesSkipped} duplicates skipped`:'📥 Legacy import complete');
+  await sb.rpc('refresh_all_funded_status').catch(()=>{});
   loadAdminUsers();
 }
 
@@ -5643,7 +5872,7 @@ async function repairMultiChildSponsorships(){
   loadSponsorship();
 }
 
-const LEGACY_IMPORT_DATA = {"sponsorships":[{"sponsorName":"SAFE HANDS SCHOOL","sponsorEmail":"safehandsschools@gmail.com","startDate":"2024-10-30","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["SUNDAY MIRACLE CHINWEOTUTO"],"dataNote":null},{"sponsorName":"RITA McGILL","sponsorEmail":"robayojie@gmail.com","startDate":"2024-10-30","childrenCount":2,"committedAmount":480000.0,"paidAmount":320000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":0.667,"coveredUntil":"2025-06-30","computedStatus":"expired","children":["CHIMA JOSEPHINE","UMAR MOHAMMED SANUSI"],"dataNote":null},{"sponsorName":"OKECHUKWU ANEKE","sponsorEmail":"kene.aneke@gmail.com","startDate":"2023-08-06","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year (plan to extend to 6yrs)","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["GIDEON KENNETH","CATHERINE DUUTSAN"],"dataNote":null},{"sponsorName":"ANNIE","sponsorEmail":"aaquaisua@gmail.com","startDate":"2024-10-23","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.333,"coveredUntil":"2025-02-22","computedStatus":"expired","children":["ALEX JANE ENECHIOJO"],"dataNote":null},{"sponsorName":"ONYINYE OBIWE","sponsorEmail":"obiweonyinye@gmail.com","startDate":"2023-08-30","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until notified","yearsFunded":1.0,"coveredUntil":"2024-08-29","computedStatus":"expired","children":["EZE FLORENCE"],"dataNote":null},{"sponsorName":"NKIRU ONYEDIMAZU","sponsorEmail":"onyedimazu@yahoo.com","startDate":"2022-09-18","childrenCount":3,"committedAmount":594000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["CHUKWUMA MIRACLE","EZRA SHESHINBWA DIVINE","PETER GRACE"],"dataNote":"Marked 'Expired' in tracker"},{"sponsorName":"KEMI OKENYODO","sponsorEmail":"kokenyodo@partnersnigeria.org","startDate":"2022-12-10","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"Till child finishes school","yearsFunded":1.0,"coveredUntil":"2023-12-10","computedStatus":"expired","children":["AUDU PRISCILLIA","DIVINE CHIBUIKE","ODEY THANKGOD (Withdrawn)"],"dataNote":null},{"sponsorName":"OLAIDE OLADAYO","sponsorEmail":"dayo.olaide@gmail.com","startDate":"2023-02-01","childrenCount":3,"committedAmount":720000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["JOY YABO","JOHN FAVOUR","OLUWOLE GODWIN OLUWAGBENGA","OLUWOLE GODWIN GBENGA"],"dataNote":null},{"sponsorName":"FEMI KUTI","sponsorEmail":"oakutiea@gmail.com","startDate":"2021-10-02","childrenCount":6,"committedAmount":1440000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["EKECHUKWU IFENNA HENDRICK","ANIEKWE SOPURUCHUKWU","SANI BASHIR","SHAMSIYA MUSA","BENJAMIN PRECIOUS","ADELEKE OPEMIPO MATTHEW"],"dataNote":null},{"sponsorName":"MAX NIGERIA","sponsorEmail":"mary.orbih@maxdrive.ai","startDate":"2022-12-09","childrenCount":10,"committedAmount":2400000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ALI FAVOUR PHILEMON","HARUNA MAHMUD","ANDUMA MIRACLE","IDAGWU BLESSING","TERNENGE PERPETUAL","JOHN WISDOM","JOSEPH OREOFEOLUWA BLESSING","AMOS MIMIDOO","MICHAEL KELVIN","UGWUOKE VICTOR"],"dataNote":null},{"sponsorName":"LELA BLOSSOM (Mrs. Oduwusi Abiola)","sponsorEmail":"biosbank40@gmail.com","startDate":"2022-01-16","childrenCount":5,"committedAmount":990000.0,"paidAmount":null,"frequency":"Two Installments","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ABODUNRIN EMMANUEL","IHEAKAOZOR FRANKLIN","IKECHUKWU DIVINE","MUSBAUDEEN UTHMAN","UCHENDU EMMANUEL"],"dataNote":null},{"sponsorName":"JOE AKENOVA","sponsorEmail":"jeakenova@yahoo.com","startDate":"2023-11-25","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until graduation","yearsFunded":0.333,"coveredUntil":"2024-03-26","computedStatus":"expired","children":["EKECHUKWU KOSSIOCHUKWU VALENTINE"],"dataNote":null},{"sponsorName":"IRELAND EMBASSY","sponsorEmail":"inimfonetuk@gmail.com","startDate":"2020-09-16","childrenCount":3,"committedAmount":720000.0,"paidAmount":594000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.825,"coveredUntil":"2021-07-14","computedStatus":"expired","children":["BAKARE FARIDA","EKECHUKWU CHINONYE","JOSEPH DINATU"],"dataNote":null},{"sponsorName":"IAL FOUNDATION","sponsorEmail":"ialfoundation86@gmail.com","startDate":"2023-09-16","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["LINUS JOSHUA","LIGHT DEBORAH"],"dataNote":null},{"sponsorName":"ZAINAB SALEH","sponsorEmail":"hajiya.zainab.saleh@gmail.com","startDate":"2023-09-07","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["HUSSAINI HALIMAT"],"dataNote":null},{"sponsorName":"FOLUSADE SAMUEL","sponsorEmail":"samuelfolu9@gmail.com","startDate":"2024-09-20","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Year to year","yearsFunded":1.0,"coveredUntil":"2025-09-20","computedStatus":"expired","children":["WONDER SAMUEL"],"dataNote":null},{"sponsorName":"ESTHER ONAH","sponsorEmail":"estheronah2006@gmail.com","startDate":"2023-06-14","childrenCount":1,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["IDAGWU BLESSING"],"dataNote":null},{"sponsorName":"DUPE OLUSOLA","sponsorEmail":"dupekolusola@gmail.com","startDate":"2024-09-15","childrenCount":15,"committedAmount":3600000.0,"paidAmount":1200000.0,"frequency":null,"cohort":"OLD","sponsorshipTerms":null,"yearsFunded":0.333,"coveredUntil":"2025-01-15","computedStatus":"expired","children":["CHRISTIANA ENE ADAKOLE","EJIKE ONUNZE","EUNICE MAGA","IMOREME PEACE ETIOFAGENA","KARISSA THOMPSON","LATIFAT ABDULLAHI","MOHAMMED SULEIMAN AKOSHI","MOSES FAITH","NANA KHADIJAT ADAMU","NANA KHADIJAT SAIDU","NTENSIBAWAI DANJUMA","THANKGOD MUTARI","VICTORIA UHEMBA MUETOR","YUSUF ABDULMALIK ONIMISI","TIMOTHY OLUWAGA"],"dataNote":null},{"sponsorName":"UDOCHUKWU ORIZU","sponsorEmail":"uddyorizu@yahoo.com","startDate":"2023-02-09","childrenCount":1,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["OGHIE TIMOTHY (Withdrawn)"],"dataNote":"Sponsored student withdrawn, replacement pending"},{"sponsorName":"MERCY UMERI/JULIA","sponsorEmail":"mercyumeri@gmail.com","startDate":"2024-04-16","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["FAVOUR OYIRINBA","OKI PATRICIA"],"dataNote":null},{"sponsorName":"KOLE SHETTIMA","sponsorEmail":"kshettim@macfound.org","startDate":"2022-09-23","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ALI FAVOUR PHILEMON","ANDUMA MIRACLE"],"dataNote":null},{"sponsorName":"AISHA PEACE","sponsorEmail":"superintendent@icsabuja.education","startDate":"2024-09-13","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":1.0,"coveredUntil":"2025-09-13","computedStatus":"expired","children":["BETHEL JACOB"],"dataNote":null},{"sponsorName":"AFRIGLOBAL FOUNDATION","sponsorEmail":"maneesh@afriglobalonline.com","startDate":"2022-12-09","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2023-12-09","computedStatus":"expired","children":["CHIMAOGU DANIEL","ABDULHAMID JEMILA","IKWUEZE DANIEL","JOSEPH PATIENCE","KUVA MERIT","OGENYI MARTHA","SALAKO KOLADE","OGAH GODWIN","SUNDAY FAITH","KEHINDE OYINDAMOLA"],"dataNote":null},{"sponsorName":"ADETOKUNBO DOSUNMU","sponsorEmail":"tokunbo.dosunmu1@gmail.com","startDate":"2024-02-01","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["MOHAMMED ABDULBASIT","ONUNZE JESSICA"],"dataNote":null},{"sponsorName":"ABIMBOLA OLADUNJOYE","sponsorEmail":"bimbo_oladunjoye@yahoo.com","startDate":"2024-02-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"As long as God engraces me / through secondary school","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["EZEKIEL DIVINE"],"dataNote":null},{"sponsorName":"NGOAGWUANI NNEKA VICTORIA (Kamsivic)","sponsorEmail":"kamsivic@gmail.com","startDate":"2025-07-17","childrenCount":1,"committedAmount":100000.0,"paidAmount":50000.0,"frequency":"Bi-annual","cohort":"NEW","sponsorshipTerms":"100k = one academic session (1 year)","yearsFunded":0.208,"coveredUntil":"2025-10-01","computedStatus":"expired","children":["OCHIMANE PROMISE FRIDAY"],"dataNote":null},{"sponsorName":"SISTERS OF JOY FOUNDATION","sponsorEmail":"sistersofjoyfoundation@gmail.com","startDate":"2025-05-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":1.0,"coveredUntil":"2026-05-15","computedStatus":"expired","children":["ANIEKWE REJOICE"],"dataNote":null},{"sponsorName":"ADEOLA MUKAH","sponsorEmail":"adeolamukah17@gmail.com","startDate":"2025-09-06","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-09-06","computedStatus":"active","children":["KASIMU JAMES","UMMI AIMANA AMINU"],"dataNote":null},{"sponsorName":"ERIC LEKWA","sponsorEmail":"lekwaeric@yahoo.com","startDate":"2025-09-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":50000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":0.208,"coveredUntil":"2025-11-24","computedStatus":"expired","children":["ROTIMI PENIEL ONYINYE"],"dataNote":null},{"sponsorName":"OLUWASEUN ADEAGBO","sponsorEmail":"impactngng@gmail.com","startDate":"2025-08-29","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":0.333,"coveredUntil":"2025-12-29","computedStatus":"expired","children":["IMOSEMI FAITH TIJESUNI"],"dataNote":null},{"sponsorName":"ARCHIBONG MARY DIMIE","sponsorEmail":"marydimie2000@yahoo.co.uk","startDate":"2025-09-13","childrenCount":5,"committedAmount":1200000.0,"paidAmount":1300000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":1.083,"coveredUntil":"2026-10-13","computedStatus":"active","children":["ADAMU SALEH","CHRISTIANA DANTENI","ADEBAYO AKOREDE PRAISE","HASSAN SHERRIF DANIEL","ONUORA LUCIA NKIRUKA"],"dataNote":null},{"sponsorName":"RACHEL ADEGBE","sponsorEmail":"radegbe@gmail.com","startDate":"2023-02-21","childrenCount":1,"committedAmount":240000.0,"paidAmount":160000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","yearsFunded":0.667,"coveredUntil":"2023-10-22","computedStatus":"expired","children":["LINUS DEBORAH UGOCHI"],"dataNote":null},{"sponsorName":"LEARNERS PURSE FOUNDATION","sponsorEmail":"info@learnerspursefoundation.org","startDate":"2025-09-29","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2026-09-29","computedStatus":"active","children":["JOSEPH MIRABEL GODIYA"],"dataNote":null},{"sponsorName":"BABATUNDE DAVID PETERS","sponsorEmail":"profpetos@petosscitech.net","startDate":"2025-10-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"Forever","yearsFunded":1.0,"coveredUntil":"2026-10-15","computedStatus":"active","children":["OSAYANDE PAUL"],"dataNote":null},{"sponsorName":"IRENE NWANNE","sponsorEmail":"Drirene94@gmail.com","startDate":"2025-10-09","childrenCount":1,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"Till she finishes school","yearsFunded":0.333,"coveredUntil":"2026-02-08","computedStatus":"expired","children":["NWAFOR OLIVIA NMASICHUKWU"],"dataNote":null},{"sponsorName":"NKECHI ADIMORA","sponsorEmail":"Nkechiadimora@gmail.com","startDate":"2025-01-20","childrenCount":2,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["ZABRAN AMOS DIVINE","ISAAC SHEKWOLO"],"dataNote":"Source sheet lists 'total annual' as 240,000 (likely swapped/typo, corrected to 480,000 for 2 children)"},{"sponsorName":"JEDIDIAH CHIDIMMA","sponsorEmail":"chiddiesmiles@gmail.com","startDate":"2025-01-14","childrenCount":5,"committedAmount":1200000.0,"paidAmount":1350000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.125,"coveredUntil":"2026-03-01","computedStatus":"expired","children":["ILIYASU MUNIRAT","ODEY PHILIA (Withdrawn)","SANNI OMAYOZA FAITH","SUNDAY GIDALTI","IFEACHO DAVID","UMAR ABDULJABAR"],"dataNote":null},{"sponsorName":"CHIEF MRS OSASU/TOS FOUNDATION","sponsorEmail":"osasu360@gmail.com","startDate":"2025-11-06","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-06","computedStatus":"active","children":["BENJAMIN BLESSING (JSS1)","HUSSAINI MARYAM","HARUNA MARYAM","MISTURA BAKARE","PATIENCE GODWIN","DIVINE EDE","DAUDA KHADIJAT","EMMANUELLA OJOACHELE IDACHABA (JSS1)","VICTORY AUDU (JSS1)","TERNENGE TERDOO EUNICE (JSS1)"],"dataNote":null},{"sponsorName":"GOLDEN FRIENDS","sponsorEmail":"Lamitumaka@gmail.com","startDate":"2025-11-05","childrenCount":1,"committedAmount":240000.0,"paidAmount":360000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":1.5,"coveredUntil":"2027-05-07","computedStatus":"active","children":["ABDULLAHI ADAMU AMINA (JSS1)"],"dataNote":null},{"sponsorName":"OVIE AKPOVWA","sponsorEmail":"Ovieakpovwa@gmail.com","startDate":"2025-11-15","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-15","computedStatus":"active","children":["ALIYU AYNIL NAIMAT OWOWA (JSS1)"],"dataNote":null},{"sponsorName":"JIBOWU SHERIFAT BOLANLE","sponsorEmail":"sherrryjibowu@gmail.com","startDate":"2025-11-21","childrenCount":1,"committedAmount":180000.0,"paidAmount":null,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["CEPHAS ELIZABETH (JSS1)"],"dataNote":null},{"sponsorName":"AIRPEACE","sponsorEmail":"hawau.alege@flyairpeace.com","startDate":"2025-11-21","childrenCount":20,"committedAmount":4800000.0,"paidAmount":4800000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2026-11-21","computedStatus":"active","children":["PETER JOHANNA (JSS1)","SAMUEL GLORIA (JSS1)","DAVID ONYINYECHI ANNA (JSS1)","MUHAMMED IBRAHIM SANI (JSS1)","OLATUNJI COMFORT OLUWAFIKAYO (JSS1)","AHMAD ABDULWAHEED ADEKOYENI (JSS1)","HELEN MOSES ENEHEZEYI (JSS1)","KATURU ADAMU (JSS1)","FADEELAH ABDULLAHI (JSS1)","TERNENGE WUESETER GLORIA (JSS1)","IKECHUKWU DIVINE (SS2)","CHIBUIKE MIRACLE (SS2)","UGWUOKE FRANKLIN (SS2)","YUSUF ROFIAT (SS3)","ONMATA PATIENCE (SS3)","UDUEZE VIVIAN (SS3)","ADEDIRAN ZAINAB (SS3)","AUDU MICHAEL (SS3)","OBINNA CHISOM (SS3)","USMAN FATIMA (SS3)"],"dataNote":null},{"sponsorName":"DR SANMI ADEDOKUN","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["PRECIOUS AGU"],"dataNote":null},{"sponsorName":"MID POINT","sponsorEmail":"midpointinitiatives@gmail.com","startDate":null,"childrenCount":10,"committedAmount":3286400.0,"paidAmount":3286400.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["SUCCESS JOSEPH","PINE PASCAL","MSONTER JEROME MATHIAS","MADUABUCHI CHIAMAKA REJOICE","JUBRIN ZAINAB ABDULSALAM","INYENE FAVOUR IFUNANYACHUKWU","ANASTECIA SYLVESTER","ABUBAKAR SADIKA","ABDULLAHI AISHA USMAN","ABDULKARIM HARUNA IBRAHIM"],"dataNote":null},{"sponsorName":"DOVELAND","sponsorEmail":"dovelandcharityfoundation@gmail.com","startDate":"2026-01-01","childrenCount":10,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2027-01-01","computedStatus":"active","children":["Chukwuma Chimamanda Emmanuella","Destiny Uchechukwu","Umar Suleiman Ummusalma","Keren Manasseh","Jemimah Samuel Onyaole","Muhammad Bashir Iliyasu","Samsudeen Mohammed","Chukwuma Favour","Umar Fatimah","James Collins"],"dataNote":null},{"sponsorName":"Olaniyi Yusuf/Verraki","sponsorEmail":"olaniyi.yusuf@verraki.com","startDate":"2023-06-09","childrenCount":5,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_no_confirmed_payment","children":["DANIEL NOAH","BENJAMIN JEREMIAH CHISOM","REJOICE KARIM","DAVID SAMUEL","ABDULLAHI ADAMU"],"dataNote":null},{"sponsorName":"Butterfly foundation","sponsorEmail":"info@butterflyfoundationforgirls.org","startDate":"2023-09-19","childrenCount":1,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","yearsFunded":1.0,"coveredUntil":"2024-09-18","computedStatus":"expired","children":["DAUDA HOPE"],"dataNote":null},{"sponsorName":"OLUWASEYI OLUEBUBE OLUFEMI","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":40000.0,"paidAmount":40000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["WILLIAM MICHAEL"],"dataNote":null},{"sponsorName":"ICS","sponsorEmail":null,"startDate":"2024-09-13","childrenCount":2,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":1.0,"coveredUntil":"2025-09-13","computedStatus":"expired","children":["ANIEKWE CHIMAOBI MIRACLE","MICHAEL FAVOUR"],"dataNote":null},{"sponsorName":"NLNG Women","sponsorEmail":null,"startDate":null,"childrenCount":1,"committedAmount":240000.0,"paidAmount":null,"frequency":null,"cohort":"NEW","sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["HAPPINESS OGHIE"],"dataNote":"Corrected: register lists a real child name (HAPPINESS OGHIE) here; a prior import mistakenly recorded it as unavailable."},{"sponsorName":"Mr Omoh Osobasi (Zion World)","sponsorEmail":null,"startDate":null,"childrenCount":10,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unknown_no_start_date","children":["JOSHUA SANASI YABO","OCHI KELECHI WISDOM","DOMINION ISIOMA","JAMES CHIDINMA","LADAN BEAUTY","PETER GRACE","AGBA GABRIEL","CHUKWUMA MIRACLE","NDUBISI GLORIA","KENNEDY UGWUOKE"],"dataNote":"Corrected: register lists 10 real child names here; a prior import mistakenly recorded them as unavailable. Some of these names also appear under other sponsors/pools (e.g. NKIRU ONYEDIMAZU, MAC ARTHUR) \u2014 same child, more than one sponsorship record, which is expected."},{"sponsorName":"MAC ARTHUR","sponsorEmail":null,"startDate":"2023-09-20","childrenCount":6,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"yearsFunded":null,"coveredUntil":null,"computedStatus":"unverified_grant_amount_not_specified","children":["OLUWOLE KIND DAVID","OCHI KELECHI WISDOM","KEREN MANASSEH","JOSHUA SANASI YABO","HARUNA MAHMUD","BENJAMIN JEREMIAH CHISOM"],"dataNote":"Register lists 'Grant' instead of a \u20a6 amount for this row \u2014 no committed/paid figure is available, so amount fields are left blank pending admin confirmation. Was previously skipped entirely; re-added because 6 real child names ARE on file. Several of these children are also listed under other sponsors \u2014 same child, multiple sponsorship records, which is expected."}],"needsManualReview":[{"sponsor":"BUKKI SHONIBARE","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"Kimpact","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"HAMZA ADRIEL","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"FORD","reason":"No usable start date / amount / children data in register \u2014 needs manual entry after admin confirms details with sponsor."},{"sponsor":"MAC ARTHUR","reason":"Imported with its 6 real children, but the register shows 'Grant' instead of a \u20a6 amount \u2014 a System Admin should confirm and enter the actual committed/paid amount via Edit."}]};
+const LEGACY_IMPORT_DATA = {"sponsorships":[{"sponsorName":"SAFE HANDS SCHOOL","sponsorEmail":"safehandsschools@gmail.com","startDate":"2024-10-30","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["SUNDAY MIRACLE CHINWEOTUTO"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Email midterm result, no response\nSend End of second term result\nJune 2- Send follow up email on 2025/2026 commitment fee\nNo Response","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"RITA McGILL","sponsorEmail":"robayojie@gmail.com","startDate":"2024-10-30","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":320000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","children":["CHIMA JOSEPHINE","UMAR MOHAMMED SANUSI"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":"Send end of term result","cta":null},{"sponsorName":"OKECHUKWU ANEKE","sponsorEmail":"kene.aneke@gmail.com","startDate":"2023-08-06","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year. Plan to continue sponsorship for the entire 6 years if satisfied with outcome.","children":["GIDEON KENNETH","CATHERINE DUUTSAN"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Sent whatsapp reminder- May 20\nEnd of second term result sent\nEmail- commitment reminder with invoice: june 3","payStatus":null,"nextAction":"Send end of term result, Schedule virtual meeting with student sponsoring using timenest follow up with payment","cta":null},{"sponsorName":"ANNIE","sponsorEmail":"aaquaisua@gmail.com","startDate":"2024-10-23","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":null,"children":["ALEX JANE ENECHIOJO"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ONYINYE OBIWE","sponsorEmail":"obiweonyinye@gmail.com","startDate":"2023-08-30","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until I notify the institution otherwise","children":["EZE FLORENCE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"NKIRU ONYEDIMAZU","sponsorEmail":"onyedimazu@yahoo.com","startDate":"2022-09-18","childrenCount":3,"declaredChildrenCount":"3","totalAnnual":720000.0,"committedAmount":594000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","children":["CHUKWUMA MIRACLE","EZRA SHESHINBWA DIVINE","PETER GRACE"],"engagementStatus":"inactive","rawStatusLabel":"Completed sponsorship","actionTaken":"Sent mail draft for ED review","payStatus":null,"nextAction":null,"cta":null},{"sponsorName":"KEMI OKENYODO","sponsorEmail":"kokenyodo@partnersnigeria.org","startDate":"2022-12-10","childrenCount":3,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"Till the child finishes school","children":["AUDU PRISCILLIA","DIVINE CHIBUIKE","ODEY THANKGOD (Withdrawn)"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Email Midterm result, no response,Sent Invoice- May 20\nSend reminder- Mention she requested for the payment at the begining of term no response and it was embarassing getting my whatsapp reminders\nSend follow up with invoice\nConfirmed payment. send acknowledgement letter and receipt","payStatus":"Completed","nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"OLAIDE OLADAYO","sponsorEmail":"dayo.olaide@gmail.com","startDate":"2023-02-01","childrenCount":4,"declaredChildrenCount":"3","totalAnnual":720000.0,"committedAmount":720000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","children":["JOY YABO","JOHN FAVOUR","OLUWOLE GODWIN OLUWAGBENGA","OLUWOLE GODWIN GBENGA"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Email Midterm result, sent wahtsapp commitment reminder, no response\nFollow up on sponsorship commitment email- sent June 10- No response","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"FEMI KUTI","sponsorEmail":"oakutiea@gmail.com","startDate":"2021-10-02","childrenCount":6,"declaredChildrenCount":"6","totalAnnual":1440000.0,"committedAmount":1440000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["EKECHUKWU IFENNA HENDRICK","ANIEKWE SOPURUCHUKWU","SANI BASHIR","SHAMSIYA MUSA","BENJAMIN PRECIOUS","ADELEKE OPEMIPO MATTHEW"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Email Midterm result, Draft for ED review\nImpact report with invoice sent- June 9- No response","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"MAX NIGERIA","sponsorEmail":"mary.orbih@maxdrive.ai","startDate":"2022-12-09","childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":2400000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["ALI FAVOUR PHILEMON","HARUNA MAHMUD","ANDUMA MIRACLE","IDAGWU BLESSING","TERNENGE PERPETUAL","JOHN WISDOM","JOSEPH OREOFEOLUWA BLESSING","AMOS MIMIDOO","MICHAEL KELVIN","UGWUOKE VICTOR"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Emailed midterm result, sent email draft to notify reprofiling of student for review to ED\nDrafted Impact report awaiting approval from ED to be sent\nImpact report with invoice sent- June 9","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"LELA BLOSSOM (Mrs. Oduwusi Abiola)","sponsorEmail":"biosbank40@gmail.com","startDate":"2022-01-16","childrenCount":5,"declaredChildrenCount":"5","totalAnnual":1200000.0,"committedAmount":990000.0,"paidAmount":null,"frequency":"Two Installments","cohort":"OLD","sponsorshipTerms":null,"children":["ABODUNRIN EMMANUEL","IHEAKAOZOR FRANKLIN","IKECHUKWU DIVINE","MUSBAUDEEN UTHMAN","UCHENDU EMMANUEL"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Email Midterm result, sent wahtsapp message, no response","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"JOE AKENOVA","sponsorEmail":"jeakenova@yahoo.com","startDate":"2023-11-25","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Until graduation","children":["EKECHUKWU KOSSIOCHUKWU VALENTINE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"-","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"IRELAND EMBASSY","sponsorEmail":"inimfonetuk@gmail.com","startDate":"2020-09-16","childrenCount":3,"declaredChildrenCount":"3","totalAnnual":720000.0,"committedAmount":720000.0,"paidAmount":594000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["BAKARE FARIDA","EKECHUKWU CHINONYE","JOSEPH DINATU"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":null,"cta":null},{"sponsorName":"IAL FOUNDATION","sponsorEmail":"ialfoundation86@gmail.com","startDate":"2023-09-16","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annaully","cohort":"OLD","sponsorshipTerms":null,"children":["LINUS JOSHUA","LIGHT DEBORAH"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"June 3rd- Emailed Invoice/Reminder","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ZAINAB SALEH","sponsorEmail":"hajiya.zainab.saleh@gmail.com","startDate":"2023-09-07","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":160000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","children":["HUSSENI HALIMAT OJOMA"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"June 3rd- Emailed Invoice- Responded to clarify outstanding","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"FOLUSADE SAMUEL","sponsorEmail":"samuelfolu9@gmail.com","startDate":"2024-09-20","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"Year to year","children":["WONDER SAMUEL"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"ESTHER ONAH","sponsorEmail":"estheronah2006@gmail.com","startDate":"2023-06-14","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"One year","children":["IDAGWU BLESSING"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":null,"cta":null},{"sponsorName":"DUPE OLUSOLA","sponsorEmail":"dupekolusola@gmail.com","startDate":"2024-09-15","childrenCount":15,"declaredChildrenCount":"15","totalAnnual":3600000.0,"committedAmount":3600000.0,"paidAmount":1200000.0,"frequency":null,"cohort":"OLD","sponsorshipTerms":null,"children":["CHRISTIANA ENE ADAKOLE","EJIKE ONUNZE","EUNICE MAGA","IMOREME PEACE ETIOFAGENA","KARISSA THOMPSON","LATIFAT ABDULLAHI","MOHAMMED SULEIMAN AKOSHI","MOSES FAITH","NANA KHADIJAT ADAMU","NANA KHADIJAT SAIDU","NTENSIBAWAI DANJUMA","THANKGOD MUTARI","VICTORIA UHEMBA MUETOR","YUSUF ABDULMALIK ONIMISI","TIMOTHY OLUWAGA"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Impact report with invoice sent- june 9","payStatus":null,"nextAction":"Send end of term result, follow up for second term payment","cta":null},{"sponsorName":"UDOCHUKWU ORIZU","sponsorEmail":"uddyorizu@yahoo.com","startDate":"2023-02-09","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":198000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"3 years","children":["OGHIE TIMOTHY- Withdrawn"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Sponsored student have been withdrawn- to be notified when replacement has been confirmed: June 10","payStatus":null,"nextAction":"Send end of term result, reschedule meeting with student, follow up with payment","cta":null},{"sponsorName":"MERCY UMERI/JULIA","sponsorEmail":"mercyumeri@gmail.com","startDate":"2024-04-16","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["FAVOUR OYIRINBA","OKI PATRICIA"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"KOLE SHETTIMA","sponsorEmail":"kshettim@macfound.org","startDate":"2022-09-23","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","children":["ALI FAVOUR PHILEMON","ANDUMA MIRACLE"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":null,"cta":null},{"sponsorName":"AISHA PEACE","sponsorEmail":"superintendent@icsabuja.education","startDate":"2024-09-13","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"3 years","children":["BETHEL JACOB"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Invoice sent awaiting payment\nPayment made\nSend acknowlegement and receipt- June 1","payStatus":"Completed","nextAction":"Send end of term result, follow up with reminder","cta":null},{"sponsorName":"AFRIGLOBAL FOUNDATION","sponsorEmail":"maneesh@afriglobalonline.com","startDate":"2022-12-09","childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["CHIMAOGU DANIEL","ABDULHAMID JEMILA","IKWUEZE DANIEL","JOSEPH PATIENCE","KUVA MERIT","OGENYI MARTHA","SALAKO KOLADE","OGAH GODWIN","SUNDAY FAITH","KEHINDE OYINDAMOLA"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Impact report sent- June 9","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ADETOKUNBO DOSUNMU","sponsorEmail":"tokunbo.dosunmu1@gmail.com","startDate":"2024-02-01","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["MOHAMMED ABDULBASIT","ONUNZE JESSICA"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Follow up on sponsorship continuation email- sent june 10","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ABIMBOLA OLADUNJOYE","sponsorEmail":"bimbo_oladunjoye@yahoo.com","startDate":"2024-02-09","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":null,"frequency":"Termly","cohort":"OLD","sponsorshipTerms":"As long as God engraces me. I am looking at sponsoring him all through his secondary education.","children":["EZEKIEL DIVINE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Whatsapp conversation; end with: Sent Invoice- May 20","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"NGOAGWUANI NNEKA VICTORIA (Kamsivic)","sponsorEmail":"kamsivic@gmail.com","startDate":"2025-07-17","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":100000.0,"paidAmount":50000.0,"frequency":"Bi- annual, 2 times within the 1 year.","cohort":"NEW","sponsorshipTerms":"payment of 100,000 is for one ward is for next academic session, 1 year","children":["OCHIMANE PROMISE FRIDAY"],"engagementStatus":"active","rawStatusLabel":"One off payment","actionTaken":null,"payStatus":null,"nextAction":null,"cta":null},{"sponsorName":"SISTERS OF JOY FOUNDATION","sponsorEmail":"sistersofjoyfoundation@gmail.com","startDate":"2025-05-15","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","children":["ANIEKWE REJOICE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":"Send end of Term","cta":null},{"sponsorName":"ADEOLA MUKAH","sponsorEmail":"adeolamukah17@gmail.com","startDate":"2025-09-06","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","children":["KASIMU JAMES","UMMI AIMANA AMINU"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ERIC LEKWA","sponsorEmail":"lekwaeric@yahoo.com","startDate":"2025-09-09","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":50000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","children":["ROTIMI PENIEL ONYINYE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"OLUWASEUN ADEAGBO","sponsorEmail":"impactngng@gmail.com","startDate":"2025-08-29","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"One year","children":["IMOSEMI FAITH TIJESUNI"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"June 2- Whatsapp call to confirm continuing sponsorship and follow up on second and third term fee\nHe requested for formal email to review financial capacity and class of student.\nEmail was sent","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"ARCHIBONG MARY DIMIE","sponsorEmail":"marydimie2000@yahoo.co.uk","startDate":"2025-09-13","childrenCount":5,"declaredChildrenCount":"5","totalAnnual":1200000.0,"committedAmount":1200000.0,"paidAmount":1300000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":null,"children":["ADAMU SALEH","CHRISTIANA DANTENI","ADEBAYO AKOREDE PRAISE","HASSAN SHERRIF DANIEL","ONUORA LUCIA NKIRUKA"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"RACHEL ADEGBE","sponsorEmail":"radegbe@gmail.com","startDate":"2023-02-21","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":160000.0,"frequency":"Monthly","cohort":"OLD","sponsorshipTerms":"3 years","children":["LINUS DEBORAH UGOCHI"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Send Reminder Early June if no payment receive before then","payStatus":null,"nextAction":"Send end of term result","cta":null},{"sponsorName":"LEARNERS PURSE FOUNDATION","sponsorEmail":"info@learnerspursefoundation.org","startDate":"2025-09-29","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":null,"children":["JOSEPH MIRABEL GODIYA"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"BABATUNDE DAVID PETERS","sponsorEmail":"profpetos@petosscitech.net","startDate":"2025-10-15","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"Forever","children":["OSAYANDE PAUL"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"IRENE NWANNE","sponsorEmail":"Drirene94@gmail.com","startDate":"2025-10-09","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":80000.0,"frequency":"Termly","cohort":"NEW","sponsorshipTerms":"Till she finishes school","children":["NWAFOR OLIVIA NMASICHUKWU"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"NKECHI ADIMORA","sponsorEmail":"Nkechiadimora@gmail.com","startDate":"2025-01-20","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":240000.0,"committedAmount":480000.0,"paidAmount":null,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":null,"children":["ZABRAN AMOS DIVINE","ISAAC SHEKWOLO"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Whatsapp message reminder sent- May 20\nJune 3- Email with invoice","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"JEDIDIAH CHIDIMMA","sponsorEmail":"chiddiesmiles@gmail.com","startDate":"2025-01-14","childrenCount":6,"declaredChildrenCount":"5","totalAnnual":1200000.0,"committedAmount":1200000.0,"paidAmount":1350000.0,"frequency":"Monthly","cohort":"NEW","sponsorshipTerms":"One year","children":["ILIYASU MUNIRAT","ODEY PHILIA- Withdrawn","SANNI OMAYOZA FAITH","SUNDAY GIDALTI","IFEACHO DAVID","UMAR ABDULJABAR"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"CHIEF MRS OSASU/ TOS FOUNDATION","sponsorEmail":"osasu360@gmail.com","startDate":"2025-06-11","childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","children":["BENJAMIN BLESSING - JSS1","HUSSAINI MARYAM -","HARUNA MARYAM","MISTURA BAKARE","PATIENCE GODWIN","DIVINE EDE","DAUDA KHADIJAT","EMMANUELLA OJOACHELE IDACHABA - JSS1","VICTORY AUDU - JSS1","TERNENGE TERDOO EUNICE - JSS1"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"GOLDEN FRIENDS","sponsorEmail":"Lamitumaka@gmail.com","startDate":"2025-11-05","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","children":["ABDULLAHI ADAMU AMINA - JSS1"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Whatsapp message to follow up on their request to speak with student- June 2\nSpoke with student- June 2","payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"OVIE  AKPOVWA","sponsorEmail":"Ovieakpovwa@gmail.com","startDate":"2025-11-15","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","children":["ALIYU AYNIL NAIMAT OWOWA - JSS1"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Sent whatsapp messages, Called- May 20 (Payment clarification in progress)\nJune 2- Whatsapp call: She want to continue for next session, said she already paid for this session.\nFollow up with account for confirmation.","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"JIBOWU SHERIFAT BOLANLE","sponsorEmail":"sherrryjibowu@gmail.com","startDate":"2025-11-21","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":180000.0,"paidAmount":null,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"6 years","children":["CEPHAS ELIZABETH - JSS1"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"AIRPEACE","sponsorEmail":"hawau.alege@flyairpeace.com","startDate":"2025-11-21","childrenCount":20,"declaredChildrenCount":"20","totalAnnual":4800000.0,"committedAmount":4800000.0,"paidAmount":4800000.0,"frequency":"Annaully","cohort":"NEW","sponsorshipTerms":"One year","children":["PETER JOHANNA - JSS1","SAMUEL GLORIA - JSS1","DAVID ONYINYECHI ANNA - JSS1","MUHAMMED IBRAHIM SANI - JSS1","OLATUNJI COMFORT OLUWAFIKAYO - JSS1","AHMAD ABDULWAHEED ADEKOYENI - JSS1","HELEN MOSES ENEHEZEYI - JSS1","KATURU ADAMU - JSS1","FADEELAH ABDULLAHI - JSS1","TERNENGE WUESETER GLORIA - JSS1","IKECHUKWU DIVINE - SS2","CHIBUIKE MIRACLE - SS2","UGWUOKE FRANKLIN - SS2","YUSUF ROFIAT - SS3","ONMATA PATIENCE - SS3","UDUEZE VIVIAN - SS3","ADEDIRAN ZAINAB - SS3","AUDU MICHAEL - SS3","OBINNA CHISOM - SS3","USMAN FATIMA - SS3"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result- May 20","cta":null},{"sponsorName":"DR SANMI ADEDOKUN","sponsorEmail":"sanmiadedokun@gmail.com","startDate":null,"childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["PRECIOUS AGU"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":null,"payStatus":null,"nextAction":"Stuent in JS 3","cta":null},{"sponsorName":"MID POINT","sponsorEmail":"midpointinitiatives@gmail.com","startDate":null,"childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":3286400.0,"paidAmount":3286400.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["SUCCESS JOSEPH","PINE PASCAL","MSONTER JEROME MATHIAS","MADUABUCHI CHIAMAKA REJOICE","JUBRIN ZAINAB ABDULSALAM","INYENE FAVOUR IFUNANYACHUKWU","ANASTECIA SYLVESTER","ABUBAKAR SADIKA","ABDULLAHI AISHA USMAN","ABDULKARIM HARUNA IBRAHIM"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send Result","cta":null},{"sponsorName":"DOVELAND","sponsorEmail":"dovelandcharityfoundation@gmail.com","startDate":"2026-01-01","childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":2400000.0,"paidAmount":2400000.0,"frequency":"Annually","cohort":"NEW","sponsorshipTerms":"One year","children":["Chukwuma Chimamanda Emmanuella","Destiny Uchechukwu","Umar Suleiman Ummusalma","Keren Manasseh","Jemimah Samuel Onyaole","Muhammad Bashir Iliyasu","Samsudeen Mohammed","Chukwuma Favour","Umar Fatimah","James Collins"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Impact report sent- June 9","payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"Olaniyi Yusuf/Verraki","sponsorEmail":"olaniyi.yusuf@verraki.com foye.oraka@verraki.com","startDate":"2023-06-09","childrenCount":5,"declaredChildrenCount":"5","totalAnnual":null,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["DANIEL NOAH","BENJAMIN JEREMIAH CHISOM","REJOICE KARIM","DAVID SAMUEL","ABDULLAHI ADAMU"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"Impact report with invoice sent- June 9","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"Butterfly foundation","sponsorEmail":"info@butterflyfoundationforgirls.org","startDate":"2023-09-19","childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":240000.0,"frequency":"Annually","cohort":"OLD","sponsorshipTerms":"One year","children":["DAUDA HOPE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":"Completed","nextAction":"Send end of term result","cta":null},{"sponsorName":"OLUWASEYI OLUEBUBE OLUFEMI","sponsorEmail":"rosemaryajibo@gmail.com","startDate":null,"childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":40000.0,"paidAmount":40000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["WILLIAM MICHAEL"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":null,"payStatus":null,"nextAction":"Send end of term result, follow up with march and april payment","cta":null},{"sponsorName":"MAC ARTHUR","sponsorEmail":null,"startDate":"2023-09-20","childrenCount":6,"declaredChildrenCount":"Grant","totalAnnual":null,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["OLUWOLE KIND DAVID","OCHI KELECHI WISDOM","KEREN MANASSEH","JOSHUA SANASI YABO","HARUNA MAHMUD","BENJAMIN JEREMIAH CHISOM"],"engagementStatus":"inactive","rawStatusLabel":"Expired","actionTaken":null,"payStatus":null,"nextAction":null,"cta":null,"dataNote":"Register shows 'Grant' instead of a \u20a6 amount \u2014 amount fields left blank pending admin confirmation."},{"sponsorName":"ICS","sponsorEmail":null,"startDate":"2024-09-13","childrenCount":2,"declaredChildrenCount":"2","totalAnnual":480000.0,"committedAmount":480000.0,"paidAmount":480000.0,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["ANIEKWE CHIMAOBI MIRACLE","MICHAEL FAVOUR"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Sent Invoice and follow up- May 20","payStatus":"Completed","nextAction":null,"cta":null},{"sponsorName":"NLNG Women","sponsorEmail":"Ijeoma.Onyenobi@nlng.com","startDate":null,"childrenCount":1,"declaredChildrenCount":"1","totalAnnual":240000.0,"committedAmount":240000.0,"paidAmount":null,"frequency":null,"cohort":"NEW","sponsorshipTerms":null,"children":["HAPPINESS OGHIE"],"engagementStatus":"pending","rawStatusLabel":null,"actionTaken":"No payment confirmation","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null},{"sponsorName":"Mr Omoh Osobasi (Zion World)","sponsorEmail":"bekkyben99@gmail.com","startDate":null,"childrenCount":10,"declaredChildrenCount":"10","totalAnnual":2400000.0,"committedAmount":null,"paidAmount":null,"frequency":null,"cohort":null,"sponsorshipTerms":null,"children":["JOSHUA SANASI YABO","OCHI KELECHI WISDOM","DOMINION ISIOMA","JAMES CHIDINMA","LADAN BEAUTY","PETER GRACE","AGBA GABRIEL","CHUKWUMA MIRACLE","NDUBISI GLORIA","KENNEDY UGWUOKE"],"engagementStatus":"active","rawStatusLabel":"Active","actionTaken":"Need email","payStatus":null,"nextAction":"Send end of term result, follow up with payment","cta":null}],"needsManualReview":[{"sponsor":"BUKKI SHONIBARE","reason":"Register shows no children, no amount, and no usable contact info \u2014 needs manual entry."},{"sponsor":"Kimpact","reason":"Register shows no children, no amount, and no usable contact info \u2014 needs manual entry."},{"sponsor":"HAMZA ADRIEL","reason":"Register shows no children, no amount, and no usable contact info \u2014 needs manual entry."},{"sponsor":"MAC ARTHUR","reason":"Imported with its 6 real children, but the register shows 'Grant' instead of a \u20a6 amount \u2014 confirm and enter the actual committed/paid amount."},{"sponsor":"FORD","reason":"Register shows no children, no amount, and no usable contact info \u2014 needs manual entry."}]};
 async function delUser(id,name){
   if(!confirm(`Deactivate "${name}"? They will no longer be able to log in, but their records are kept.`))return;
   const result=await dbUpdate('Users',id,{status:'suspended'});
@@ -5654,6 +5883,34 @@ async function delUser(id,name){
 
 // ── Edit Role / Access Level (System Administrator & Knosk Admin only) ──
 let _editRoleUserId=null;
+// ── Edit Profile (name/email/phone) — any user, e.g. correcting a
+//    sponsor's contact info or fixing a placeholder email from import ──
+let _editingProfileId=null;
+function openEditProfileModal(u){
+  if(!isSystemAdmin()){ toast('Only a System Admin can edit profile records.','warn'); return; }
+  _editingProfileId=u.id;
+  $('epf-name').value=u.name||'';
+  $('epf-email').value=u.email||'';
+  $('epf-phone').value=u.phone||'';
+  $('epf-sponsor-type').value=u.sponsorType||'';
+  $('edit-profile-msg').innerHTML='';
+  openModal('modal-edit-profile');
+}
+async function saveProfileEdit(){
+  const updates={
+    name:$('epf-name').value.trim(),
+    email:$('epf-email').value.trim().toLowerCase(),
+    phone:$('epf-phone').value.trim(),
+    sponsorType:$('epf-sponsor-type').value.trim(),
+  };
+  const result=await dbUpdate('Users',_editingProfileId,updates);
+  const msg=$('edit-profile-msg');
+  if(!result?.success){ msg.innerHTML=`<div class="alert al-err">${result?.error||'Could not save.'}</div>`; return; }
+  msg.innerHTML='<div class="alert al-ok">✅ Saved.</div>';
+  toast('✅ Profile updated');
+  setTimeout(()=>{closeModal('modal-edit-profile');loadAdminUsers();},700);
+}
+
 function openEditRoleModal(id){
   const u=_adminUsersCache.find(x=>x.id===id);
   if(!u){toast('User not found','warn');return;}
@@ -7260,7 +7517,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       updateSoundToggleUI();
       const {data:{session}}=await sb.auth.getSession();
       if(session?.user){
-        const {data:profile}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+        const {data:profile}=await sb.from('profiles').select('*').eq('auth_user_id',session.user.id).single();
         if(profile && profile.status==='active'){
           S=_fromDbRow('Users',profile);
           S.id=profile.id;
