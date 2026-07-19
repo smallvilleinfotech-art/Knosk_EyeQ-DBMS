@@ -3392,6 +3392,7 @@ async function initApp(){
   loadDashboard(role);
   loadNotifications();
   startNotifPolling();
+  startDataRealtime();
   // Close overlay clicks
   document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 }
@@ -4976,7 +4977,9 @@ function filterSponsorDir(){
 }
 
 // ── SPONSOR DETAIL PAGE ──
+let _currentSponsorDetailId=null;
 async function viewSponsorDetail(sponsorId){
+  _currentSponsorDetailId=sponsorId;
   const spon=await dbRead('Sponsorships');
   const users=await dbRead('Users');
   const students=await dbRead('Students');
@@ -6199,6 +6202,47 @@ function startNotifRealtime(){
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'notifications', filter:`user_id=eq.${S.id}` },
       ()=>{ loadNotifications(); })
     .subscribe();
+}
+
+// Re-renders whichever screen is currently open, if it shows data that
+// could have just changed. This is what makes "the dashboard is real
+// on a realtime basis" actually true — a background cache refresh
+// alone doesn't redraw an already-open screen; this does.
+function refreshCurrentViewIfRelevant(){
+  const active=document.querySelector('.view.active');
+  if(!active||!S?.id) return;
+  const id=active.id;
+  const role=S.activeRole||S.role;
+  try{
+    if(id==='view-dashboard') loadDashboard(role);
+    else if(id==='view-sponsorship') loadSponsorship();
+    else if(id==='view-cf-sponsorship') loadCFSponsorship();
+    else if(id==='view-sponsor-detail' && _currentSponsorDetailId) viewSponsorDetail(_currentSponsorDetailId);
+    else if(id==='view-students') loadStudentsView();
+    else if(id==='view-analytics') loadAnalytics();
+    else if(id==='view-users') loadAdminUsers();
+    else if(id==='view-my-sponsored') loadMySponsored();
+  }catch(e){ console.warn('refreshCurrentViewIfRelevant failed for',id,e); }
+}
+
+// Realtime for the core sponsorship data — sponsorships, students,
+// sponsor engagement, and profiles (sponsors/students/staff). Any
+// insert/update/delete invalidates the relevant cache AND re-renders
+// whatever screen is currently open, so imports, edits, and approvals
+// show up live without anyone needing to refresh or re-navigate.
+let _dataRealtimeChannel=null;
+function startDataRealtime(){
+  if(_dataRealtimeChannel || !S?.id) return;
+  const onChange=(sheet)=>()=>{ _invalidate(sheet); refreshCurrentViewIfRelevant(); };
+  _dataRealtimeChannel = sb.channel('data-changes')
+    .on('postgres_changes', { event:'*', schema:'public', table:'sponsorships' }, onChange('Sponsorships'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'students' }, onChange('Students'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'sponsor_engagement' }, onChange('SponsorEngagement'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'profiles' }, onChange('Users'))
+    .subscribe();
+}
+function stopDataRealtime(){
+  if(_dataRealtimeChannel){ sb.removeChannel(_dataRealtimeChannel); _dataRealtimeChannel=null; }
 }
 // Poll for new notifications while the app is open — now just a slow
 // fallback in case the realtime connection drops, not the primary path.
@@ -7473,6 +7517,7 @@ function cleanupSession(){
   if(_slidePoll)clearInterval(_slidePoll);
   stopNotifPolling();
   if(_notifRealtimeChannel){ sb.removeChannel(_notifRealtimeChannel); _notifRealtimeChannel=null; }
+  stopDataRealtime();
   clearTimeout(_inactivityTimer);
 }
 
